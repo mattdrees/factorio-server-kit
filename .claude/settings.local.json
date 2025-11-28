@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./init.sh:*)",
+      "Bash(./plan.sh)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
