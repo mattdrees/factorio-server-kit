@@ -1,27 +1,19 @@
 [
   {
     "default": true,
-    "location": "london",
-    "zone": "europe-west2-c"
+    "location": "iowa",
+    "zone": "us-central1-c"
   },
   {
     "location": "losangeles",
     "zone": "us-west2-a"
   },
   {
-    "location": "sydney",
-    "zone": "australia-southeast1-b"
-  },
-  {
-    "location": "tokyo",
-    "zone": "asia-northeast1-c"
+    "location": "dallas",
+    "zone": "us-south1-b"
   },
   {
     "location": "southcarolina",
     "zone": "us-east1-d"
-  },
-  {
-    "location": "belgium",
-    "zone": "europe-west1-b"
   }
 ]
