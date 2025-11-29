@@ -30,7 +30,7 @@ source "googlecompute" "factorio" {
   machine_type        = "c2d-standard-2"
   preemptible         = false
   project_id          = var.project_id
-  source_image_family = "ubuntu-2004-lts"
+  source_image_family = "ubuntu-2204-lts"
   ssh_username        = "packer"
   tags                = ["ssh-from-world"]
   use_os_login        = true

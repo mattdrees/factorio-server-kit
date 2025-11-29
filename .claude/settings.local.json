@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(./init.sh:*)",
-      "Bash(./plan.sh)"
+      "Bash(./plan.sh)",
+      "Bash(gcloud compute firewall-rules list:*)",
+      "Bash(gcloud compute instances describe:*)",
+      "Bash(gcloud compute ssh factorio-iowa-20251128-200458 --zone=us-central1-c --command=\"sudo docker ps -a && echo ''---LOGS---'' && sudo docker logs factorio --tail 50\")",
+      "Bash(gcloud compute ssh factorio-iowa-20251128-200458 --zone=us-central1-c --command=\"sudo docker pull factoriotools/factorio:stable && sudo docker restart factorio\")",
+      "Bash(gcloud compute ssh:*)",
+      "Bash(gcloud compute instance-templates list:*)",
+      "Bash(gcloud dns managed-zones list:*)"
     ],
     "deny": [],
     "ask": []
