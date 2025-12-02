@@ -3,7 +3,7 @@ set -euxo pipefail
 
 container_name="factorio"
 image_name="factoriotools/factorio"
-image_tag="stable"
+image_tag="latest"
 image="$image_name":"$image_tag"
 
 docker rm --force "$container_name"

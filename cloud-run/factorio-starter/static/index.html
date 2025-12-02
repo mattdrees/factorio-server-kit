@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Factorio Server</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 32px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 16px;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        button {
+            flex: 1;
+            padding: 16px 24px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-start {
+            background: #10b981;
+            color: white;
+        }
+
+        .btn-start:hover:not(:disabled) {
+            background: #059669;
+        }
+
+        .btn-status {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .btn-status:hover:not(:disabled) {
+            background: #2563eb;
+        }
+
+        #result {
+            background: #f3f4f6;
+            border-radius: 8px;
+            padding: 20px;
+            min-height: 120px;
+            display: none;
+        }
+
+        #result.show {
+            display: block;
+        }
+
+        .status-none { color: #6b7280; }
+        .status-creating { color: #f59e0b; }
+        .status-starting { color: #8b5cf6; }
+        .status-running { color: #10b981; }
+        .status-error { color: #ef4444; }
+
+        .result-header {
+            font-weight: 600;
+            font-size: 18px;
+            margin-bottom: 12px;
+        }
+
+        .result-detail {
+            margin: 8px 0;
+            color: #4b5563;
+            font-size: 14px;
+        }
+
+        .result-detail strong {
+            color: #1f2937;
+            display: inline-block;
+            min-width: 120px;
+        }
+
+        .loading {
+            opacity: 0.6;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏭 Factorio Server</h1>
+        <p class="subtitle">Start and manage your game server</p>
+
+        <div style="margin-bottom: 24px;">
+            <label for="apiKey" style="display: block; margin-bottom: 8px; color: #374151; font-weight: 500;">
+                Password
+            </label>
+            <input
+                type="password"
+                id="apiKey"
+                placeholder="Enter password"
+                style="width: 100%; padding: 12px; border: 2px solid #d1d5db; border-radius: 8px; font-size: 16px; transition: border-color 0.2s;"
+                onfocus="this.style.borderColor='#667eea'"
+                onblur="this.style.borderColor='#d1d5db'"
+            />
+        </div>
+
+        <div class="buttons">
+            <button class="btn-start" onclick="startServer()" id="startBtn">
+                Start Server
+            </button>
+            <button class="btn-status" onclick="checkStatus()" id="statusBtn">
+                Check Status
+            </button>
+        </div>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        function getApiKey() {
+            return document.getElementById('apiKey').value;
+        }
+
+        function showLoading(message) {
+            const result = document.getElementById('result');
+            result.className = 'show loading';
+            result.innerHTML = `<div class="spinner"></div>${message}`;
+        }
+
+        function showResult(html, statusClass = '') {
+            const result = document.getElementById('result');
+            result.className = `show ${statusClass}`;
+            result.innerHTML = html;
+        }
+
+        function setButtonsEnabled(enabled) {
+            document.getElementById('startBtn').disabled = !enabled;
+            document.getElementById('statusBtn').disabled = !enabled;
+        }
+
+        async function startServer() {
+            const apiKey = getApiKey();
+            if (!apiKey) {
+                showResult(`
+                    <div class="result-header status-error">⚠️ Password Required</div>
+                    <div class="result-detail">Please enter a password to continue.</div>
+                `, 'status-error');
+                return;
+            }
+
+            showLoading('Starting server...');
+            setButtonsEnabled(false);
+
+            try {
+                const response = await fetch('/start', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: '{}'
+                });
+
+                const data = await response.json();
+
+                if (response.status === 202) {
+                    showResult(`
+                        <div class="result-header status-creating">✨ Server Creation Started!</div>
+                        <div class="result-detail"><strong>Status:</strong> ${data.status}</div>
+                        <div class="result-detail"><strong>Started at:</strong> ${new Date(data.started_at).toLocaleString()}</div>
+                        <div class="result-detail" style="margin-top: 16px;">
+                            The server is being created. This usually takes 1-2 minutes.
+                            Click "Check Status" to see progress.
+                        </div>
+                    `, 'status-creating');
+                } else if (response.status === 409) {
+                    showResult(`
+                        <div class="result-header status-error">⚠️ Server Already Exists</div>
+                        <div class="result-detail">${data.message}</div>
+                        ${data.instance_name ? `<div class="result-detail"><strong>Instance:</strong> ${data.instance_name}</div>` : ''}
+                        ${data.instance_ip ? `<div class="result-detail"><strong>IP Address:</strong> ${data.instance_ip}</div>` : ''}
+                    `, 'status-error');
+                } else {
+                    showResult(`
+                        <div class="result-header status-error">❌ Error</div>
+                        <div class="result-detail">${data.message || 'Unknown error occurred'}</div>
+                    `, 'status-error');
+                }
+            } catch (error) {
+                showResult(`
+                    <div class="result-header status-error">❌ Network Error</div>
+                    <div class="result-detail">Failed to connect to server: ${error.message}</div>
+                `, 'status-error');
+            } finally {
+                setButtonsEnabled(true);
+            }
+        }
+
+        async function checkStatus() {
+            const apiKey = getApiKey();
+            if (!apiKey) {
+                showResult(`
+                    <div class="result-header status-error">⚠️ Password Required</div>
+                    <div class="result-detail">Please enter a password to continue.</div>
+                `, 'status-error');
+                return;
+            }
+
+            showLoading('Checking server status...');
+            setButtonsEnabled(false);
+
+            try {
+                const response = await fetch('/status', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'none') {
+                    showResult(`
+                        <div class="result-header status-none">💤 No Server Running</div>
+                        <div class="result-detail">No server is currently running or being created.</div>
+                        <div class="result-detail" style="margin-top: 16px;">
+                            Click "Start Server" to create a new one.
+                        </div>
+                    `, 'status-none');
+                } else if (data.status === 'creating') {
+                    showResult(`
+                        <div class="result-header status-creating">⏳ Server Creating...</div>
+                        <div class="result-detail"><strong>Status:</strong> ${data.status}</div>
+                        <div class="result-detail"><strong>Started at:</strong> ${new Date(data.started_at).toLocaleString()}</div>
+                        <div class="result-detail" style="margin-top: 16px;">
+                            The server is still being created. Please wait...
+                        </div>
+                    `, 'status-creating');
+                } else if (data.status === 'starting') {
+                    showResult(`
+                        <div class="result-header status-starting">🚀 Server Starting...</div>
+                        <div class="result-detail"><strong>Status:</strong> VM is up, waiting for Factorio</div>
+                        <div class="result-detail"><strong>Instance:</strong> ${data.instance_name}</div>
+                        <div class="result-detail"><strong>IP Address:</strong> ${data.instance_ip}</div>
+                        <div class="result-detail"><strong>Zone:</strong> ${data.zone}</div>
+                        <div class="result-detail"><strong>Created at:</strong> ${new Date(data.created_at).toLocaleString()}</div>
+                        <div class="result-detail" style="margin-top: 16px;">
+                            The VM is up, waiting for the Factorio game server to start. This usually takes 1-2 minutes.
+                        </div>
+                    `, 'status-starting');
+                } else if (data.status === 'running') {
+                    showResult(`
+                        <div class="result-header status-running">✅ Server Running!</div>
+                        <div class="result-detail"><strong>Instance:</strong> ${data.instance_name}</div>
+                        <div class="result-detail"><strong>IP Address:</strong> ${data.instance_ip}</div>
+                        <div class="result-detail"><strong>Zone:</strong> ${data.zone}</div>
+                        <div class="result-detail"><strong>Created at:</strong> ${new Date(data.created_at).toLocaleString()}</div>
+                        <div class="result-detail" style="margin-top: 16px;">
+                            Connect to: <strong>${data.instance_ip}:34197</strong>
+                        </div>
+                    `, 'status-running');
+                } else if (data.status === 'error') {
+                    showResult(`
+                        <div class="result-header status-error">❌ Server Creation Failed</div>
+                        <div class="result-detail"><strong>Error:</strong> ${data.message}</div>
+                        ${data.failed_at ? `<div class="result-detail"><strong>Failed at:</strong> ${new Date(data.failed_at).toLocaleString()}</div>` : ''}
+                    `, 'status-error');
+                }
+            } catch (error) {
+                showResult(`
+                    <div class="result-header status-error">❌ Network Error</div>
+                    <div class="result-detail">Failed to connect to server: ${error.message}</div>
+                `, 'status-error');
+            } finally {
+                setButtonsEnabled(true);
+            }
+        }
+
+        // Load saved API key from localStorage
+        const savedKey = localStorage.getItem('factorio-api-key');
+        if (savedKey) {
+            document.getElementById('apiKey').value = savedKey;
+        }
+
+        // Save API key to localStorage when changed
+        document.getElementById('apiKey').addEventListener('change', function() {
+            localStorage.setItem('factorio-api-key', this.value);
+        });
+
+        // Check status on page load if we have a saved key
+        if (savedKey) {
+            checkStatus();
+        }
+    </script>
+</body>
+</html>

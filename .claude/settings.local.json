@@ -9,7 +9,20 @@
       "Bash(gcloud compute ssh factorio-iowa-20251128-200458 --zone=us-central1-c --command=\"sudo docker pull factoriotools/factorio:stable && sudo docker restart factorio\")",
       "Bash(gcloud compute ssh:*)",
       "Bash(gcloud compute instance-templates list:*)",
-      "Bash(gcloud dns managed-zones list:*)"
+      "Bash(gcloud dns managed-zones list:*)",
+      "WebFetch(domain:docs.cloud.google.com)",
+      "WebFetch(domain:stackoverflow.com)",
+      "Bash(curl:*)",
+      "Bash(gcloud run services:*)",
+      "Bash(gcloud run revisions list:*)",
+      "Bash(./build.sh)",
+      "Bash(gcloud compute instances list:*)",
+      "Bash(gcloud compute images list:*)",
+      "Bash(CLOUDSDK_CORE_PROJECT=silken-gadget-435515-i7 ./deploy.sh:*)",
+      "Bash(gcloud logging read:*)",
+      "Bash(gcloud compute instances delete:*)",
+      "Bash(python3:*)",
+      "Bash(timeout 5 bash -c \"</dev/tcp/34.63.232.114/27015\")"
     ],
     "deny": [],
     "ask": []
