@@ -22,7 +22,9 @@
       "Bash(gcloud logging read:*)",
       "Bash(gcloud compute instances delete:*)",
       "Bash(python3:*)",
-      "Bash(timeout 5 bash -c \"</dev/tcp/34.63.232.114/27015\")"
+      "Bash(timeout 5 bash -c \"</dev/tcp/34.63.232.114/27015\")",
+      "Bash(gsutil ls:*)",
+      "Bash(CLOUDSDK_CORE_PROJECT=silken-gadget-435515-i7 ./apply.sh:*)"
     ],
     "deny": [],
     "ask": []
