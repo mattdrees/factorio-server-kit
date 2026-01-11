@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, Response
 from fastapi.responses import JSONResponse
 from datetime import datetime
 from app.auth import verify_api_key
@@ -41,8 +41,11 @@ async def start_server(
 
 
 @router.get("/status")
-async def get_status(_: str = Depends(verify_api_key)):
+async def get_status(response: Response, _: str = Depends(verify_api_key)):
     """Get current server status by querying GCP resources"""
+    # Prevent caching to ensure fresh status
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
     return get_server_status()
 
 

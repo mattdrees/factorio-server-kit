@@ -1,12 +1,27 @@
 """Derive server state from GCP resources (stateless)."""
-from google.cloud import compute_v1
+from google.cloud import compute_v1, storage
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+import json
 import logging
 from app.config import settings
 from app.rcon import check_rcon_ready
 
 logger = logging.getLogger(__name__)
+
+
+def load_zones_from_gcs() -> List[str]:
+    """Load all zones from locations.json in GCS."""
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(settings.factorio_storage_bucket)
+        blob = bucket.blob("lib/locations.json")
+        content = blob.download_as_text()
+        locations = json.loads(content)
+        return [loc["zone"] for loc in locations]
+    except Exception as e:
+        logger.warning(f"Failed to load zones from GCS, using default: {e}")
+        return ["us-central1-c"]
 
 
 def get_server_status() -> Dict[str, Any]:
@@ -20,9 +35,8 @@ def get_server_status() -> Dict[str, Any]:
     try:
         compute = compute_v1.InstancesClient()
 
-        # Get all zones from locations (we'll check all of them)
-        # For now, check the default zone (us-central1-c)
-        zones = ["us-central1-c"]  # TODO: Load from locations.json if needed
+        # Load zones from locations.json in GCS
+        zones = load_zones_from_gcs()
 
         instances = []
         for zone in zones:
