@@ -18,7 +18,7 @@ def load_zones_from_gcs() -> List[str]:
         blob = bucket.blob("lib/locations.json")
         content = blob.download_as_text()
         locations = json.loads(content)
-        return [loc["zone"] for loc in locations]
+        return [zone for loc in locations for zone in loc.get("zones", [])]
     except Exception as e:
         logger.warning(f"Failed to load zones from GCS, using default: {e}")
         return ["us-central1-c"]
