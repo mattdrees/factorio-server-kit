@@ -17,6 +17,6 @@ type PubSubMessage struct {
 // location describes the structure of a JSON file that we use to denote which GCP regions and zones are in use by this
 // project.
 type location struct {
-	Location string `json:"location"`
-	Zone     string `json:"zone"`
+	Location string   `json:"location"`
+	Zones    []string `json:"zones"`
 }

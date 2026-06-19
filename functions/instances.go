@@ -29,21 +29,23 @@ func Instances(ctx context.Context, _ PubSubMessage) error {
 	}
 
 	for _, loc := range locs {
-		listCall := computeService.Instances.List(projectID, loc.Zone)
-		listCall = listCall.Filter(fmt.Sprintf("name:factorio-%s-*", strings.ToLower(loc.Location)))
+		for _, zone := range loc.Zones {
+			listCall := computeService.Instances.List(projectID, zone)
+			listCall = listCall.Filter(fmt.Sprintf("name:factorio-%s-*", strings.ToLower(loc.Location)))
 
-		list, err := listCall.Do()
-		if err != nil {
-			return fmt.Errorf("error listing instances in zone %s: %w", loc.Zone, err)
-		}
+			list, err := listCall.Do()
+			if err != nil {
+				return fmt.Errorf("error listing instances in zone %s: %w", zone, err)
+			}
 
-		for _, inst := range list.Items {
-			if inst.Status == statusTerminated {
-				deleteCall := computeService.Instances.Delete(projectID, loc.Zone, inst.Name)
+			for _, inst := range list.Items {
+				if inst.Status == statusTerminated {
+					deleteCall := computeService.Instances.Delete(projectID, zone, inst.Name)
 
-				if _, err := deleteCall.Do(); err != nil {
-					return fmt.Errorf("error executing delete operation for instance %s in zone %s: %w",
-						inst.Name, loc.Zone, err)
+					if _, err := deleteCall.Do(); err != nil {
+						return fmt.Errorf("error executing delete operation for instance %s in zone %s: %w",
+							inst.Name, zone, err)
+					}
 				}
 			}
 		}
