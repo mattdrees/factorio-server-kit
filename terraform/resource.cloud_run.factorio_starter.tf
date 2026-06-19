@@ -44,8 +44,8 @@ resource "google_cloud_run_service" "factorio_starter" {
 
     metadata {
       annotations = {
-        "autoscaling.knative.dev/maxScale"      = "1"
-        "run.googleapis.com/cpu-throttling"     = "false"
+        "autoscaling.knative.dev/maxScale"  = "1"
+        "run.googleapis.com/cpu-throttling" = "false"
       }
     }
   }
