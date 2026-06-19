@@ -19,7 +19,7 @@ instance_zone=$(curl --header "Metadata-Flavor: Google" --silent \
 
 push_saves_to=$(
   jq --raw-output \
-    '.[] | select(.zone == "'"$(basename "$instance_zone")"'") | .location' \
+    '.[] | select(.zones | index("'"$(basename "$instance_zone")"'")) | .location' \
     <<< "$locations"
 )
 
