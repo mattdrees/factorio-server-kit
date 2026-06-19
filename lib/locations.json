@@ -2,18 +2,14 @@
   {
     "default": true,
     "location": "iowa",
-    "zone": "us-central1-c"
+    "zones": ["us-central1-c", "us-central1-a", "us-central1-b", "us-central1-f"]
   },
   {
     "location": "losangeles",
-    "zone": "us-west2-a"
-  },
-  {
-    "location": "dallas",
-    "zone": "us-south1-b"
+    "zones": ["us-west2-a", "us-west2-c"]
   },
   {
     "location": "southcarolina",
-    "zone": "us-east1-d"
+    "zones": ["us-east1-d", "us-east1-b", "us-east1-c"]
   }
 ]
