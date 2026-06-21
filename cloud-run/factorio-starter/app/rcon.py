@@ -19,12 +19,23 @@ class RCONError(Exception):
 
 def check_rcon_ready(host: str, port: int = 27015, password: str = None, timeout: int = 5) -> bool:
     """
-    Check if Factorio RCON server is ready by attempting to connect and authenticate.
+    Check if Factorio's RCON server is ready by connecting and probing the
+    auth endpoint.
+
+    Factorio only opens the RCON port once the map has finished loading and
+    the server is ready for players, so any auth response from it is a
+    reliable readiness signal. We deliberately do NOT require a *successful*
+    authentication: the factoriotools/factorio image generates a random RCON
+    password at startup (stored in /factorio/config/rconpw) that overrides
+    server-settings.json, so we can't know it from here. A rejected auth
+    (response_id == -1) still proves the RCON listener is up and the server
+    is ready.
 
     Args:
         host: Server IP address
         port: RCON port (default 27015)
-        password: RCON password (if None, uses placeholder)
+        password: RCON password (only used to elicit an auth response; the
+            value need not be correct)
         timeout: Connection timeout in seconds
 
     Returns:
@@ -35,19 +46,27 @@ def check_rcon_ready(host: str, port: int = 27015, password: str = None, timeout
 
     try:
         with socket.create_connection((host, port), timeout=timeout) as sock:
-            # Try to authenticate
+            # Probe the auth endpoint to elicit a response.
             request_id = 1
             _send_packet(sock, request_id, SERVERDATA_AUTH, password)
 
             # Read auth response
             response_id, response_type, _ = _receive_packet(sock)
 
-            # Successful auth means server is ready
-            if response_type == SERVERDATA_AUTH_RESPONSE and response_id == request_id:
-                logger.info(f"RCON connection successful to {host}:{port}")
+            # Any auth response means the RCON listener is up and the game
+            # server has finished loading. We don't require auth to succeed.
+            if response_type == SERVERDATA_AUTH_RESPONSE:
+                if response_id == request_id:
+                    logger.info(f"RCON auth successful to {host}:{port}")
+                else:
+                    logger.info(
+                        f"RCON up at {host}:{port} (auth rejected, but server is ready)"
+                    )
                 return True
             else:
-                logger.warning(f"RCON auth failed to {host}:{port}")
+                logger.warning(
+                    f"Unexpected RCON response type {response_type} from {host}:{port}"
+                )
                 return False
 
     except socket.timeout:
