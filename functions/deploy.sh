@@ -37,6 +37,9 @@ for func_name in "${func_names[@]}"; do
   delete_region=()
 
   for ((i = 0; i < ${#functions_list[@]}; i += 1)); do
+    # mapfile on empty jq output yields a single empty element; skip it (e.g. first-ever deploy).
+    [[ -z ${functions_list[$i]} ]] && continue
+
     func=${functions_list[$i]##*locations/}
     func=${func%%/functions*}
 
@@ -62,10 +65,10 @@ for func_name in "${func_names[@]}"; do
     functions
     deploy
     "$function_name"
-    --docker-registry=artifact-registry
+    --gen2
     --entry-point="$func_name"
     --max-instances=1
-    --runtime=go121
+    --runtime=go123
     --trigger-topic="$function_name"
   )
 

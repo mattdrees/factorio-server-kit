@@ -5,11 +5,14 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/compute/metadata"
+	"github.com/cloudevents/sdk-go/v2/event"
 	"google.golang.org/api/compute/v1"
 )
 
 // Disks iterates across all available zones deleting disks that are no longer attached to an instance.
-func Disks(ctx context.Context, _ PubSubMessage) error {
+//
+// It is a 2nd-gen Cloud Function CloudEvent handler; the Pub/Sub message that triggers it carries no payload we use.
+func Disks(ctx context.Context, _ event.Event) error {
 	projectID, err := metadata.ProjectID()
 	if err != nil {
 		return fmt.Errorf("error fetching project ID from metadata: %w", err)
