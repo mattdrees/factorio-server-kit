@@ -68,7 +68,7 @@ for func_name in "${func_names[@]}"; do
     --gen2
     --entry-point="$func_name"
     --max-instances=1
-    --runtime=go124
+    --runtime=go126
     --trigger-topic="$function_name"
   )
 
