@@ -1,4 +1,5 @@
 import logging
+from secrets import compare_digest
 
 from fastapi import Header, HTTPException
 from google.auth.transport import requests as google_requests
@@ -8,11 +9,15 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-API_KEY = "Tanager"
-
 
 async def verify_api_key(authorization: str = Header(None)):
-    """Validate API key from Authorization header"""
+    """Validate the API key from the Authorization header against the value
+    injected from Secret Manager (the API_KEY env var)."""
+    if not settings.api_key:
+        # Fail closed: the service is misconfigured if no key is set.
+        logger.error("API_KEY is not configured; rejecting request")
+        raise HTTPException(status_code=503, detail="Server auth not configured")
+
     if not authorization:
         raise HTTPException(
             status_code=401,
@@ -27,7 +32,7 @@ async def verify_api_key(authorization: str = Header(None)):
 
     provided_key = authorization.split(" ", 1)[1]
 
-    if provided_key != API_KEY:
+    if not compare_digest(provided_key, settings.api_key):
         raise HTTPException(
             status_code=401,
             detail="Invalid API key"

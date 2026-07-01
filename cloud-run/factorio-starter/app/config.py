@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     factorio_dns_name: str = "factorio.menagerie.games"
     factorio_storage_bucket: str = ""
     port: int = 8080
+    # API key for the web UI / REST API, injected from Secret Manager via the
+    # API_KEY env var (see Terraform). Empty => auth fails closed.
+    api_key: str = os.getenv("API_KEY", "")
     # Machine types to try (in order) when the instance template's default
     # machine type is unavailable. Tried after the template default, across a
     # region's zones, before moving on to the next region. Keep in sync with

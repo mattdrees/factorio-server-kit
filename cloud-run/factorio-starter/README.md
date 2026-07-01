@@ -8,7 +8,7 @@ Cloud Run service that allows players to start Factorio servers via a simple web
 - **REST API**: Simple endpoints for programmatic access
 - **Async Operations**: Server creation happens in background
 - **Single Server**: Only one server allowed at a time (cost protection)
-- **Authentication**: Hardcoded API key "Tanager" (MVP simplicity)
+- **Authentication**: API key stored in Secret Manager, injected as the `API_KEY` env var
 
 ## Quick Start
 
@@ -44,7 +44,7 @@ open https://factorio-starter-xxxxx.run.app
 
 ```bash
 curl -X POST https://factorio-starter-xxxxx.run.app/start \
-  -H "Authorization: Bearer Tanager"
+  -H "Authorization: Bearer <your-api-key>"
 ```
 
 Returns `202 Accepted` immediately:
@@ -60,7 +60,7 @@ Returns `202 Accepted` immediately:
 
 ```bash
 curl -X GET https://factorio-starter-xxxxx.run.app/status \
-  -H "Authorization: Bearer Tanager"
+  -H "Authorization: Bearer <your-api-key>"
 ```
 
 Returns current status:
@@ -97,8 +97,8 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8080
 
 # Test
-curl -X POST http://localhost:8080/start -H "Authorization: Bearer Tanager"
-curl -X GET http://localhost:8080/status -H "Authorization: Bearer Tanager"
+curl -X POST http://localhost:8080/start -H "Authorization: Bearer <your-api-key>"
+curl -X GET http://localhost:8080/status -H "Authorization: Bearer <your-api-key>"
 ```
 
 ### Run Tests
@@ -151,7 +151,7 @@ Environment variables (set in Terraform):
 
 ## Security
 
-- **API Key**: Hardcoded to "Tanager" in `app/auth.py` for MVP simplicity
+- **API Key**: Stored in Secret Manager (`factorio-starter-api-key`), injected as `API_KEY`; rotate by adding a new secret version (the service reads `latest`)
 - **Public Endpoint**: Anyone can access the web UI, but API calls require the key
 - **Cost Protection**: Only one server allowed at a time
 - **Auto-Shutdown**: Existing goppuku service shuts down idle servers
@@ -185,7 +185,6 @@ gcloud run services logs read factorio-starter \
 
 ## Future Enhancements
 
-- Secret Manager for API key
 - Multiple API keys with per-player permissions
 - Rate limiting (prevent spam)
 - Location selection in Web UI

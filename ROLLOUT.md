@@ -117,8 +117,8 @@ cd ..
 SERVICE_URL=$(gcloud run services describe factorio-starter \
   --region="$(gcloud run services list --format='value(REGION)' --filter='factorio-starter' | head -1)" \
   --format='value(status.url)')
-curl -X POST "$SERVICE_URL/start"  -H 'Authorization: Bearer Tanager'
-curl -X GET  "$SERVICE_URL/status" -H 'Authorization: Bearer Tanager'
+curl -X POST "$SERVICE_URL/start"  -H 'Authorization: Bearer <your-api-key>'
+curl -X GET  "$SERVICE_URL/status" -H 'Authorization: Bearer <your-api-key>'
 ```
 
 ## Notes

@@ -15,6 +15,17 @@ resource "google_cloud_run_service" "factorio_starter" {
           value = var.project_id
         }
 
+        # API key, read from Secret Manager (value added out-of-band).
+        env {
+          name = "API_KEY"
+          value_from {
+            secret_key_ref {
+              name = google_secret_manager_secret.factorio_starter_api_key.secret_id
+              key  = "latest"
+            }
+          }
+        }
+
         env {
           name  = "FACTORIO_IMAGE_FAMILY"
           value = "packtorio"
