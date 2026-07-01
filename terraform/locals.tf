@@ -8,4 +8,8 @@ locals {
 
   # Image deploy.sh passes the built digest; fall back to the floating tag.
   factorio_starter_image = var.factorio_starter_image != "" ? var.factorio_starter_image : "gcr.io/${var.project_id}/factorio-starter:latest"
+
+  # The service's own base URL (new-style, deterministic from project number).
+  # Used as the Cloud Tasks target host and the OIDC audience for /internal/create.
+  factorio_starter_url = "https://factorio-starter-${data.google_project.this.number}.${local.default_region}.run.app"
 }

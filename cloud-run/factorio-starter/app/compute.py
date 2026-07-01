@@ -135,7 +135,10 @@ def create_server():
 
     except Exception as e:
         logger.error(f"Failed to create server: {e}", exc_info=True)
-        # No state to update - errors will be reflected in GCP instance status
+        # Re-raise so callers can react: /internal/create returns a non-2xx so
+        # Cloud Tasks retries with backoff. (The legacy BackgroundTask path just
+        # lets Starlette log it.) Instance-level errors also show up in /status.
+        raise
 
 
 def list_instances(compute: compute_v1.InstancesClient, zone: str, filter: str = None):

@@ -16,6 +16,19 @@ class Settings(BaseSettings):
     # lib/300.exports.sh.
     machine_type_fallbacks: List[str] = ["n2-standard-2", "n2d-standard-2", "e2-standard-2"]
 
+    # Cloud Tasks migration: when true, /start enqueues a task that calls
+    # /internal/create instead of running create_server() as an in-process
+    # BackgroundTask. This lets the creation walk run inside an authenticated
+    # request (CPU allocated for its full duration) so CPU throttling can be
+    # enabled. All values below are injected by Terraform (see the Cloud Run
+    # resource); defaults keep the legacy BackgroundTask path for local dev.
+    use_cloud_tasks: bool = os.getenv("USE_CLOUD_TASKS", "false").lower() == "true"
+    tasks_queue: str = os.getenv("TASKS_QUEUE", "factorio-create")
+    tasks_location: str = os.getenv("TASKS_LOCATION", "")
+    tasks_invoker_sa: str = os.getenv("TASKS_INVOKER_SA", "")
+    # Base URL of this service; used as the task target host and OIDC audience.
+    service_url: str = os.getenv("SERVICE_URL", "")
+
     def __init__(self):
         super().__init__()
         if not self.factorio_storage_bucket:

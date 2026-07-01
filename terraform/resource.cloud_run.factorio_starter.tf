@@ -30,6 +30,33 @@ resource "google_cloud_run_service" "factorio_starter" {
           value = "factorio.menagerie.games"
         }
 
+        # Cloud Tasks migration: enqueue creation instead of running it as an
+        # in-process BackgroundTask.
+        env {
+          name  = "USE_CLOUD_TASKS"
+          value = "true"
+        }
+
+        env {
+          name  = "TASKS_QUEUE"
+          value = google_cloud_tasks_queue.factorio_create.name
+        }
+
+        env {
+          name  = "TASKS_LOCATION"
+          value = google_cloud_tasks_queue.factorio_create.location
+        }
+
+        env {
+          name  = "TASKS_INVOKER_SA"
+          value = google_service_account.factorio_starter_tasks.email
+        }
+
+        env {
+          name  = "SERVICE_URL"
+          value = local.factorio_starter_url
+        }
+
         resources {
           limits = {
             cpu    = "1"
@@ -38,13 +65,18 @@ resource "google_cloud_run_service" "factorio_starter" {
         }
       }
 
-      # Reduced timeout since we return immediately
-      timeout_seconds = 60
+      # /internal/create runs the creation walk synchronously within the
+      # request, so the timeout must cover the worst-case walk (keep the
+      # gunicorn --timeout in the Dockerfile >= this value).
+      timeout_seconds = 900
     }
 
     metadata {
       annotations = {
-        "autoscaling.knative.dev/maxScale"  = "1"
+        "autoscaling.knative.dev/maxScale" = "1"
+        # NOTE: still always-allocated. Flip to "true" (request-based CPU) only
+        # AFTER verifying the Cloud Tasks path works end-to-end -- that is the
+        # cost-saving payoff of this migration and the final rollout step.
         "run.googleapis.com/cpu-throttling" = "false"
       }
     }

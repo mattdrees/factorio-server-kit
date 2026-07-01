@@ -1,9 +1,14 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, Response
+import logging
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from fastapi.responses import JSONResponse
 from datetime import datetime
-from app.auth import verify_api_key
+from app.auth import verify_api_key, verify_task_oidc
+from app.config import settings
 from app.gcp_state import get_server_status, has_running_or_creating_instance
 from app.compute import create_server
+from app.tasks import enqueue_create_task
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -31,8 +36,14 @@ def start_server(
             }
         )
 
-    # Start creation in background
-    background_tasks.add_task(create_server)
+    # Kick off creation. With Cloud Tasks, enqueue a task that Cloud Run
+    # delivers to /internal/create as a real request (CPU allocated for its
+    # whole duration). Otherwise fall back to an in-process BackgroundTask,
+    # which only survives while CPU is always-allocated.
+    if settings.use_cloud_tasks:
+        enqueue_create_task()
+    else:
+        background_tasks.add_task(create_server)
 
     # Return immediately
     return JSONResponse(
@@ -43,6 +54,29 @@ def start_server(
             "started_at": datetime.utcnow().isoformat()
         }
     )
+
+
+@router.post("/internal/create")
+def internal_create(_: dict = Depends(verify_task_oidc)):
+    """Cloud Tasks target: run the creation walk synchronously in this request.
+
+    Only callable with an OIDC token from the tasks invoker SA (see
+    verify_task_oidc). Returns non-2xx on failure so Cloud Tasks retries.
+    """
+    # At-least-once delivery + retries can redeliver this task. If a server is
+    # already running or being created, treat it as done so we never end up with
+    # two servers (also enforced by the queue's max_concurrent_dispatches=1).
+    if has_running_or_creating_instance():
+        logger.info("Server already running/creating; skipping duplicate create task")
+        return {"status": "skipped", "reason": "server already exists"}
+
+    try:
+        create_server()
+    except Exception as e:
+        logger.error(f"create_server failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Server creation failed")
+
+    return {"status": "created"}
 
 
 @router.get("/status")
