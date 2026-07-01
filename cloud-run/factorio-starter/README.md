@@ -126,8 +126,7 @@ Player → Web UI → GET /status ──▶ derive state from GCP + RCON probe
 Server creation is deferred to **Cloud Tasks** so the walk runs inside an
 authenticated `/internal/create` request (CPU allocated for its whole
 duration) rather than an in-process BackgroundTask that dies once Cloud Run CPU
-throttling is enabled. Set `USE_CLOUD_TASKS=false` to fall back to the legacy
-BackgroundTask path (requires always-allocated CPU; handy for local dev).
+throttling is enabled.
 
 **Key Components**:
 - `main.py`: FastAPI app entry point
@@ -146,7 +145,6 @@ Environment variables (set in Terraform):
 - `FACTORIO_IMAGE_FAMILY`: "packtorio" (instance template name pattern)
 - `FACTORIO_DNS_ZONE`: "factorio-server" (Cloud DNS zone name)
 - `FACTORIO_DNS_NAME`: "factorio.menagerie.games" (DNS record to update)
-- `USE_CLOUD_TASKS`: "true" to enqueue creation via Cloud Tasks (default false)
 - `TASKS_QUEUE` / `TASKS_LOCATION`: Cloud Tasks queue name and region
 - `TASKS_INVOKER_SA`: service account whose OIDC token authenticates `/internal/create`
 - `SERVICE_URL`: this service's base URL (Cloud Tasks target host + OIDC audience)

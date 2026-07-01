@@ -30,13 +30,6 @@ resource "google_cloud_run_service" "factorio_starter" {
           value = "factorio.menagerie.games"
         }
 
-        # Cloud Tasks migration: enqueue creation instead of running it as an
-        # in-process BackgroundTask.
-        env {
-          name  = "USE_CLOUD_TASKS"
-          value = "true"
-        }
-
         env {
           name  = "TASKS_QUEUE"
           value = google_cloud_tasks_queue.factorio_create.name

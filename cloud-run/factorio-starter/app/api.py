@@ -1,9 +1,8 @@
 import logging
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import JSONResponse
 from datetime import datetime
 from app.auth import verify_api_key, verify_task_oidc
-from app.config import settings
 from app.gcp_state import get_server_status, has_running_or_creating_instance
 from app.compute import create_server
 from app.tasks import enqueue_create_task
@@ -14,10 +13,7 @@ router = APIRouter()
 
 
 @router.post("/start")
-def start_server(
-    background_tasks: BackgroundTasks,
-    _: str = Depends(verify_api_key)
-):
+def start_server(_: str = Depends(verify_api_key)):
     """Start server creation (async).
 
     Defined as a sync handler so the blocking GCP probe in
@@ -36,14 +32,10 @@ def start_server(
             }
         )
 
-    # Kick off creation. With Cloud Tasks, enqueue a task that Cloud Run
-    # delivers to /internal/create as a real request (CPU allocated for its
-    # whole duration). Otherwise fall back to an in-process BackgroundTask,
-    # which only survives while CPU is always-allocated.
-    if settings.use_cloud_tasks:
-        enqueue_create_task()
-    else:
-        background_tasks.add_task(create_server)
+    # Enqueue a Cloud Tasks task that Cloud Run delivers to /internal/create as
+    # a real request, so the creation walk runs with CPU allocated for its whole
+    # duration (survives request-based CPU billing).
+    enqueue_create_task()
 
     # Return immediately
     return JSONResponse(
