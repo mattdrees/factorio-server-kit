@@ -4,26 +4,64 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Factorio Server Kit automates running a Factorio game server on Google Cloud Platform using preemptible VMs to minimize costs. The project uses Bash scripts, Terraform for infrastructure-as-code, Cloud Build pipelines with Packer for VM image creation, and Go-based Cloud Functions for automated cleanup.
+Factorio Server Kit automates running a Factorio game server on Google Cloud Platform using
+Spot/preemptible VMs to minimize costs. There are two ways to launch a server:
+
+1. **From the command line** — the `scripts/roll-vm.sh` Bash script.
+2. **From a browser** — a Cloud Run "starter" service (`cloud-run/factorio-starter/`, a Python
+   FastAPI app with a small web UI and REST API).
+
+Both paths create a VM from the most recent `packtorio-*` instance template. Supporting pieces:
+Terraform for infrastructure-as-code, Cloud Build pipelines with Packer for VM image creation, and a
+Go-based Cloud Function for automated cleanup of terminated instances.
 
 ## Key Architecture Components
 
 ### 1. Location Management System
-- **lib/locations.json**: Defines all valid GCP zones and their friendly names (london, sydney, tokyo, etc.)
-- One location must be marked with `"default": true`
-- **lib/300.exports.sh**: Parses locations.json and exports the `FACTORIO_SERVER_LOCATIONS` associative array mapping location names to zones
-- All scripts source this to understand available deployment locations
+- **lib/locations.json**: An array of locations. Each entry has a friendly `location` name (iowa,
+  losangeles, southcarolina, …) and a `zones` array. **The schema uses `zones` (an array), not a
+  single `zone` string.** The first zone in each array is the primary/preferred zone; the rest are
+  in-region fallbacks. Exactly one location must be marked with `"default": true`.
+- **lib/300.exports.sh**: Parses locations.json and exports the `FACTORIO_SERVER_LOCATIONS`
+  associative array mapping each location name to its **primary** zone.
+- **lib/206.func.env.zone_fallback.sh**: Provides the zone/machine-type fallback walk used when a zone
+  is out of capacity (`ZONE_RESOURCE_POOL_EXHAUSTED`).
+- All scripts source these to understand available deployment locations and fallback order.
 
 ### 2. Library System (lib/)
 All main scripts source the entire lib/ directory in numeric order:
 - **100.prereqs.sh**: Validates required tools (gcloud, jq) and environment variables
-- **200-205 series**: Utility functions (password generation, array joining, VM deletion, DNS updates, location setting)
-- **300.exports.sh**: Sets up environment variables and exports (FACTORIO_DNS_NAME, FACTORIO_IMAGE_FAMILY, FACTORIO_LOCATION, etc.)
+- **200–205 series**: Utility functions (password generation, array joining, VM deletion, DNS
+  updates, location setting, run-date formatting)
+- **206.func.env.zone_fallback.sh**: Zone + machine-type fallback helpers
+- **300.exports.sh**: Sets up environment variables and exports (FACTORIO_DNS_NAME,
+  FACTORIO_IMAGE_FAMILY, FACTORIO_LOCATION, FACTORIO_MACHINE_TYPE_FALLBACKS, etc.)
 - **400.terraform.sh**: Terraform-related functions
 
-Scripts must set `FACTORIO_ROOT` to the git repository root, then source all lib/*.sh files before executing main logic.
+Scripts must set `FACTORIO_ROOT` to the git repository root, then source all lib/*.sh files before
+executing main logic.
 
-### 3. VM Image Creation Pipeline
+### 3. Cloud Run Starter Service (cloud-run/factorio-starter/)
+A Python **FastAPI** app deployed to Cloud Run that lets players start a server without a local
+toolchain. Key points:
+- **Endpoints**: `/` (web UI), `POST /start`, `GET /status`, `GET /health`, and `POST
+  /internal/create`.
+- **Deferred creation**: `POST /start` returns `202` immediately and enqueues a **Cloud Tasks** job.
+  Cloud Tasks then calls `POST /internal/create` (authenticated with an OIDC token) so the slow
+  VM-creation walk runs inside a request that has CPU allocated for its full duration — necessary
+  because Cloud Run CPU throttling is enabled (request-based billing). There is no in-process
+  BackgroundTask path.
+- **Stateless status**: `app/gcp_state.py` derives status by inspecting live GCP resources plus an
+  RCON probe, rather than storing state.
+- **Auth**: `app/auth.py` validates the API key (stored in Secret Manager as
+  `factorio-starter-api-key`, injected as the `API_KEY` env var) and verifies Cloud Tasks OIDC
+  tokens for `/internal/create`.
+- **Single server**: only one server is allowed at a time (cost protection).
+- **Layout**: `main.py` (entry point), `app/api.py` (routes), `app/tasks.py` (Cloud Tasks enqueue),
+  `app/compute.py` (GCE operations), `app/dns.py` (Cloud DNS updates), `static/index.html` (web UI).
+- **deploy.sh** builds the container image **and runs `terraform apply`**, then prints the service URL.
+
+### 4. VM Image Creation Pipeline
 Two-stage Cloud Build process:
 1. **cloud-build/0-packer/**: Creates a Docker image containing Packer
 2. **cloud-build/1-factorio-server/**: Uses the Packer Docker image to build a GCE VM image with:
@@ -32,25 +70,33 @@ Two-stage Cloud Build process:
    - Optional Graftorio monitoring (Grafana + Prometheus)
    - goppuku binary for auto-shutdown when player count stays at zero
 
-The **build.sh** script handles the build workflow, syncing lib/ files to Cloud Storage, submitting the Cloud Build, and pruning old images.
+The **build.sh** script handles the build workflow, syncing lib/ files to Cloud Storage, submitting
+the Cloud Build, and pruning old images. Use `--graftorio` to bake in monitoring.
 
-### 4. Cloud Functions (functions/)
-Go-based Cloud Functions using the legacy event-driven model:
-- **cleanup.go**: Entry point for cleanup function triggered by Cloud Scheduler via Pub/Sub
-- **instances.go**: Deletes terminated VMs matching the naming pattern used by roll-vm.sh
+### 5. Cloud Functions (functions/)
+Go-based Cloud Function deployed as a **gen2** function (see `functions/deploy.sh`, `--gen2`, runtime
+`go126`), triggered by Cloud Scheduler via Pub/Sub:
+- **cleanup.go**: Entry point for the cleanup function
+- **instances.go**: Deletes terminated VMs matching the naming pattern used by roll-vm.sh (iterating
+  every zone in every location's `zones` array)
 - **disks.go**: Cleans up orphaned disks
 - **locations.go**: Fetches location data from Cloud Storage
 
-The cleanup function runs periodically to remove terminated instances across all zones defined in locations.json.
+`deploy.sh` discovers the exported functions via `go doc`, cleans up any copies deployed in other
+regions, then deploys each one.
 
-### 5. Terraform Infrastructure (terraform/)
-Provisions:
-- Cloud Pub/Sub topic: `cleanup-instances`
-- Cloud Scheduler job: triggers cleanup function periodically
-- Cloud Storage buckets for saves and general storage
-- Note: Uses remote state stored in gs://<project>-tfstate bucket (created by init.sh)
+### 6. Terraform Infrastructure (terraform/)
+Split into one `resource.*.tf` file per concern. Provisions:
+- Cloud Pub/Sub topic + Cloud Scheduler job for the cleanup function
+- Cloud Run service and Cloud Tasks queue for the factorio-starter
+- Secret Manager secret (`factorio-starter-api-key`)
+- Service accounts (factorio server VM, factorio-starter) and required project service enablement
+- Firewall rule for the Factorio port
+- Cloud Storage buckets: `<project>-saves-<location>` (keyed with `for_each` off locations.json) and
+  `<project>-storage`
+- Note: uses remote state stored in `gs://<project>-tfstate` (created by init.sh)
 
-Scripts: **init.sh** (creates state bucket + terraform init), **plan.sh**, **apply.sh**
+Scripts: **init.sh** (creates state bucket + terraform init), **plan.sh**, **apply.sh**.
 
 ## Common Development Commands
 
@@ -68,23 +114,28 @@ cd terraform
 
 # Build Packer Docker image (do this first)
 cd cloud-build/0-packer
-# Follow instructions in that directory's README
+./build.sh                    # follow the directory's README
 
 # Build Factorio server VM image
 cd cloud-build/1-factorio-server
 ./build.sh                    # Standard build
 ./build.sh --graftorio        # Include Graftorio monitoring
 
-# Deploy a server
+# Deploy the Cloud Run starter (optional; builds container + terraform apply)
+cd cloud-run/factorio-starter
+./deploy.sh
+
+# Deploy a server from the CLI
 cd scripts
 ./roll-vm.sh                          # Deploy to default location
 ./roll-vm.sh --sydney                 # Deploy to specific location
 ./roll-vm.sh --machine-type=e2-medium # Specify machine type
-./roll-vm.sh --logs                   # Open Stackdriver logs after creation
+./roll-vm.sh --logs                   # Open Cloud Logging after creation
+./roll-vm.sh --help                   # Full option list including all locations
 
 # Delete running servers
 ./delete-vm.sh                # Delete all VMs
-./delete-vm.sh factorio-*     # Delete VMs matching pattern
+./delete-vm.sh 'factorio-*'   # Delete VMs matching pattern
 ```
 
 ### Working with Cloud Functions
@@ -92,11 +143,27 @@ cd scripts
 ```bash
 cd functions
 
-# Deploy the cleanup function
+# Deploy the cleanup function(s)
 ./deploy.sh
 
-# The function is triggered by Cloud Scheduler (configured in Terraform)
-# Manual testing: publish message to cleanup-instances Pub/Sub topic
+# Triggered by Cloud Scheduler (configured in Terraform).
+# Manual testing: publish a message to the cleanup Pub/Sub topic.
+```
+
+### Working with the Cloud Run Starter
+
+```bash
+cd cloud-run/factorio-starter
+
+# Local development
+export GOOGLE_CLOUD_PROJECT=your-project-id
+gcloud auth application-default login
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8080
+
+# Against a deployed instance (API key required for /start and /status)
+curl -X POST "$STARTER_URL/start"  -H "Authorization: Bearer <your-api-key>"
+curl -X GET  "$STARTER_URL/status" -H "Authorization: Bearer <your-api-key>"
 ```
 
 ### Linting and Testing
@@ -132,16 +199,25 @@ Critical variables exported by lib/300.exports.sh:
 - `CLOUDSDK_CORE_PROJECT`: GCP project ID (must be set by user)
 - `CLOUDSDK_COMPUTE_REGION`: Set dynamically based on zone
 - `CLOUDSDK_COMPUTE_ZONE`: Set dynamically based on location
-- `FACTORIO_SERVER_LOCATIONS`: Associative array of location→zone mappings
+- `FACTORIO_SERVER_LOCATIONS`: Associative array of location→primary-zone mappings
 - `FACTORIO_IMAGE_FAMILY`: "packtorio"
 - `FACTORIO_IMAGE_NAME`: Generated with timestamp
 - `FACTORIO_DNS_NAME`: factorio.menagerie.games
 - `FACTORIO_LOCATION`: Default location from locations.json
+- `FACTORIO_MACHINE_TYPE_FALLBACKS`: Alternate machine types tried on capacity stockout
 - `FACTORIO_PACKER_VERSION` and `FACTORIO_PACKER_VERSION_SHA256SUM`
+
+### Zone and Machine-Type Fallback
+When a zone is out of capacity, both the CLI (`roll-vm.sh`) and the web starter walk fallbacks with a
+**"stay in region, then downgrade"** strategy: for each region (selected location first, then the
+others), exhaust its zones with the instance template's default machine type (`c2d-standard-2`), then
+downgrade through `FACTORIO_MACHINE_TYPE_FALLBACKS` across those same zones, before moving to the next
+region. The machine-type list lives in **lib/300.exports.sh** and
+**cloud-run/factorio-starter/app/config.py** — keep them in sync.
 
 ### VM Naming Convention
 VMs are named: `<server-type>-<location>-<timestamp>`
-Example: `factorio-sydney-20231115-143022`
+Example: `factorio-southcarolina-20231115-143022`
 
 This pattern is used by both roll-vm.sh (creation) and the cleanup Cloud Function (deletion).
 
@@ -155,7 +231,8 @@ result=$(gcloud "${gcloud_args[@]}")
 ```
 
 ### gsutil Considerations
-When running locally (potentially from Mac), use `-o "GSUtil:parallel_process_count=1"` to avoid resource issues.
+When running locally (potentially from Mac), use `-o "GSUtil:parallel_process_count=1"` to avoid
+resource issues.
 
 ## Configuration Files
 
@@ -178,11 +255,14 @@ Required external tools:
 - **shellharden** (Bash security)
 - **shellcheck** (Bash linting)
 
-Go dependencies managed in functions/go.mod (Go Cloud Functions).
+Go dependencies are managed in functions/go.mod (Go Cloud Function). The Cloud Run starter's Python
+dependencies are in cloud-run/factorio-starter/requirements.txt.
 
 ## Notes on Cost Optimization
 
-- Uses **preemptible VMs** to reduce costs significantly
-- **goppuku** service auto-shuts down the server after 15 minutes with zero players
-- Cleanup function removes terminated instances to avoid storage costs
-- Cloud Scheduler triggers periodic cleanup to minimize resource usage
+- Uses **Spot/preemptible VMs** to reduce compute costs significantly.
+- **goppuku** auto-shuts down the server after 15 minutes with zero players.
+- The Cloud Run starter uses **request-based (CPU-throttled) billing** and defers slow work to Cloud
+  Tasks, so CPU is billed only while a request is in flight.
+- The **cleanup Cloud Function** removes terminated instances and orphaned disks to avoid storage
+  costs; Cloud Scheduler triggers it periodically.

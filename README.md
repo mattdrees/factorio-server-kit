@@ -1,148 +1,216 @@
-# Welcome to the Factorio Server Kit 👋
+# Factorio Server Kit 👋
 
-[![License: The Unlicense](https://img.shields.io/badge/License-The%20Unlicense-yellow.svg)][1]
-[![Twitter: jlucktay](https://img.shields.io/twitter/follow/jlucktay.svg?style=social)][2]
-[![Wakatime tracker](https://wakatime.com/badge/github/jlucktay/factorio-server-kit.svg)][3]
+[![License: The Unlicense](https://img.shields.io/badge/License-The%20Unlicense-yellow.svg)][unlicense]
 
-> Running your own Factorio server on Google Cloud
+> Run your own [Factorio] server on Google Cloud, cheaply and (mostly) automatically.
 
-Much like [the game] itself, this project aims to automate as much as possible, when it comes to running your own
-Factorio server.
+Factorio Server Kit stands up a Factorio game server on Google Cloud Platform. It leans on
+[preemptible/Spot VMs] and an auto-shutdown service to keep running costs low, and gives you two ways
+to launch a server:
 
-The scripts are based around the use of [preemptible VMs] which keeps running costs low.
+- **From your machine** — the `roll-vm.sh` Bash script (full control, all the knobs).
+- **From a browser** — a [Cloud Run "starter" service](cloud-run/factorio-starter/) with a small web
+  UI and REST API, so players can bring the server up themselves without a local toolchain.
 
-## Installation
+Infrastructure is managed with [Terraform], VM images are baked with [Packer] via Cloud Build, and a
+Go [Cloud Function] periodically cleans up terminated instances.
 
-### Initial setup
+## How it works
 
-1. Make sure the following tools are installed, available in your `$PATH`, and (where necessary) authorised:
-    1. [Google Cloud SDK] - [quickstarts][gc-quick]
-        1. [Installation][gc-inst]
-        1. [Authorisation][gc-auth]
-    1. [jq]
-        1. [Installation][jq-inst]
-    1. [Terraform]
-        1. [Installation][tf-inst]
-1. Get started on the [GCP Free Tier] and [create a new Google Cloud project][gc-project]
-    - **Note: you are responsible for the running costs incurred by this project** beyond the limits of the Free Tier.
-      Every effort has been made to optimise and minimise the costs of resource usage, and as of this writing running a
-      server for ~50 hours a month cost less than £5 in total, but this is an isolated example from a sample size of 1.
-1. Set the `CLOUDSDK_CORE_PROJECT` environment variable to the Google Cloud project ID
-    1. For example: `export CLOUDSDK_CORE_PROJECT=my-factorio-server-kit`
-1. Run up the Terraform stack to provision infrastructure in GCP (implemented? -> ❌/✅)
-    1. Cloud Pub/Sub topic `cleanup-instances` ✅
-    1. Cloud Scheduler job `cleanup-instances` to publish to topic ✅
-    1. Cloud Function `cleanup-instances` to clean up terminated instances, triggered by topic ✅
-    1. Cloud Storage buckets
-        1. `<project>-backup-saves` ❌
-        1. `<project>-saves-<location>` ✅
-        1. `<project>-storage` ❌
-    1. Cloud DNS (optional)
-        1. Managed zone ❌
-        1. Record set ❌
-1. Run the Cloud Build pipelines in order
-    1. [Packer builder Docker image]
-    1. [Factorio server VM image]
+```
+                          ┌─────────────────────────────────────────────┐
+  Player (browser) ─────▶ │  Cloud Run: factorio-starter (FastAPI)       │
+                          │  POST /start ─enqueue▶ Cloud Tasks ─OIDC▶     │
+                          │  /internal/create ─▶ create VM from template  │
+                          └───────────────────────┬─────────────────────-┘
+                                                   │
+  You (CLI) ── roll-vm.sh ──────────────────────▶  │
+                                                   ▼
+                                     ┌──────────────────────────────┐
+                                     │  Compute Engine (Spot VM)     │
+                                     │  from newest `packtorio-*`    │
+                                     │  instance template:           │
+                                     │   • Factorio server container │
+                                     │   • goppuku (auto-shutdown)   │
+                                     │   • Graftorio (optional)      │
+                                     └──────────────┬───────────────-┘
+                                                    │ updates
+                                                    ▼
+                                          Cloud DNS A record
+                                       (factorio.menagerie.games)
 
-### As desired
+  Cloud Scheduler ─▶ Pub/Sub ─▶ Cloud Function (Go): delete terminated VMs & orphaned disks
+```
 
-1. Fire off the `roll-vm.sh` Bash script described below
+Both launch paths create a VM from the most recent `packtorio-*` instance template. If the chosen
+zone is out of capacity, they **walk the fallback list**: they exhaust every zone in the target region
+with the template's default machine type, then downgrade through alternate machine types across those
+same zones, before moving on to the next region. Saves are stored per-region but a starting server
+loads the globally newest autosave, so the save follows the server wherever it lands.
+
+## Key components
+
+| Area | Path | What it does |
+| --- | --- | --- |
+| Bash scripts | [`scripts/`](scripts/) | Roll up, delete, and manage servers from your machine. |
+| Shared library | [`lib/`](lib/) | Sourced by every script (numeric order): prereq checks, location/zone parsing, DNS updates, fallback logic, exports. |
+| Locations | [`lib/locations.json`](lib/locations.json) | Valid regions and their zones; one is marked `"default": true`. |
+| Web starter | [`cloud-run/factorio-starter/`](cloud-run/factorio-starter/) | Cloud Run FastAPI service + web UI/API to start a server. |
+| VM image build | [`cloud-build/`](cloud-build/) | Two-stage Cloud Build: a Packer Docker image, then the Factorio VM image. |
+| Cleanup function | [`functions/`](functions/) | Go Cloud Function that deletes terminated VMs and orphaned disks. |
+| Infrastructure | [`terraform/`](terraform/) | Pub/Sub, Scheduler, Cloud Run, Cloud Tasks, Secret Manager, buckets, firewall, service accounts. |
+| Config | [`config/`](config/), [`mods/`](mods/) | Server, map, mod, admin, and whitelist settings. |
+
+## Prerequisites
+
+Install these, put them on your `$PATH`, and (where noted) authenticate:
+
+- [Google Cloud SDK] (`gcloud`) — [install][gc-inst] and [authorise][gc-auth]
+- [jq]
+- [Terraform]
+
+For hacking on the Bash scripts, the linter (`./lint-bash.sh`, run on pre-push via [lefthook]) also
+wants `shfmt`, `shellharden`, and `shellcheck`.
+
+You'll also need a Google Cloud project on the [GCP Free Tier] (or otherwise). **You are responsible
+for the costs this project incurs.** Everything here is tuned to minimise spend, but that's on you to
+monitor.
+
+## Setup
+
+```bash
+# 1. Point at your GCP project.
+export CLOUDSDK_CORE_PROJECT=my-factorio-server-kit
+
+# 2. Provision infrastructure. init.sh creates the remote-state bucket
+#    (gs://<project>-tfstate) and runs `terraform init`.
+cd terraform
+./init.sh
+./plan.sh
+./apply.sh
+cd ..
+
+# 3. Build the VM image (two stages). Do the Packer builder first.
+cd cloud-build/0-packer     # see this dir's README
+./build.sh
+cd ../1-factorio-server
+./build.sh                  # add --graftorio to bake in Grafana + Prometheus monitoring
+cd ../..
+
+# 4. (Optional) Deploy the web starter so players can launch from a browser.
+cd cloud-run/factorio-starter
+./deploy.sh                 # builds the container, then applies Terraform, and prints the URL
+cd ../..
+```
+
+Terraform provisions, among other things, the Cloud DNS record the servers point at
+(`factorio.menagerie.games` by default — change `FACTORIO_DNS_NAME` in
+[`lib/300.exports.sh`](lib/300.exports.sh) and the starter's Terraform env to your own domain), the
+`<project>-saves-<location>` buckets, and the Secret Manager secret (`factorio-starter-api-key`) that
+holds the web starter's API key.
 
 ## Usage
 
-The project is primarily driven by Bash scripts, supported by Cloud Build pipelines and Terraform
-infrastructure-as-code.
+### From the command line
 
-### Cloud Build pipelines
+```bash
+cd scripts
 
-### Terraform IaC
+./roll-vm.sh                          # deploy to the default location
+./roll-vm.sh --sydney                 # deploy to a specific location (see --help for the list)
+./roll-vm.sh --machine-type=e2-medium # pin a machine type
+./roll-vm.sh --logs                   # open Cloud Logging after creation
+./roll-vm.sh --help                   # full option list, including all locations
 
-### Bash scripts
+./delete-vm.sh                        # delete all running servers
+./delete-vm.sh 'factorio-*'           # delete servers matching a name pattern
+```
 
-- [roll-vm.sh] - the main point of execution; will run up a GCE VM hosting Docker containers for
-    the Factorio server itself, as well as additional containers with Grafana and Prometheus that tie into [Graftorio]
-  - the location/region that the VM will deploy to follows a default based on the [`locations.json` file], and can be
-        overridden with a `--<location>` flag; see `roll-vm.sh --help` for more information
-  - the [machine type] of the VM can be specified with the `--machine-type=...` flag
-- [delete-vm.sh] - deletes any VMs currently running in the project, optionally filtering by name
+`roll-vm.sh` picks the newest `packtorio-*` instance template, creates a Spot VM from it (walking
+zones and machine types on capacity stockouts), and updates the Cloud DNS A record to the new IP.
 
-#### Library
+Other handy scripts in [`scripts/`](scripts/):
 
-Each of the above scripts taps into a common library of functionality under the [lib](lib/) directory.
+- `let-me-in.sh` — open the firewall to your current public IP.
+- `snapshot-saves.sh` — archive every `-saves-<location>` bucket into a timestamped Archive-class bucket.
+- `throwaway-vm.sh` — spin up a scratch VM for poking around.
+- `last-baked.sh` — show the most recently built image/template.
+- `settings.sync.factorio.sh` / `settings.diff.factorio.sh` — push/compare local config against a running server.
+- `grafana-setup.sh`, `check-signed.sh` (DNSSEC), `gsutil-sync.sh`, `list-all-project-resources.sh` — one-off utilities.
 
-### Other notes
+### From a browser (Cloud Run starter)
 
-### Map (re)generation settings
+Once deployed, open the service URL for the web UI, or drive the API directly. The API requires the
+key stored in Secret Manager; the web UI is public but can only trigger authenticated actions.
 
-The two settings files `map-settings.json` and `map-gen-settings.json` can be created from a map exchange string in the
-game [as outlined here][map-settings].
+```bash
+STARTER_URL=https://factorio-starter-xxxxx.run.app
 
-## Upstream issues outstanding
+# Start a server (returns 202 immediately; creation runs in the background via Cloud Tasks).
+curl -X POST "$STARTER_URL/start" -H "Authorization: Bearer <your-api-key>"
 
-- [Graftorio support for Factorio 0.18.x](https://github.com/afex/graftorio/pull/15)
+# Poll status: none | creating | running | error.
+curl -X GET "$STARTER_URL/status" -H "Authorization: Bearer <your-api-key>"
+```
+
+Only one server is allowed at a time (cost protection). See the
+[starter's README](cloud-run/factorio-starter/README.md) for the full API, local-dev instructions,
+and architecture notes.
+
+## Configuration files
+
+Server behaviour is driven by the JSON under [`config/`](config/) and [`mods/`](mods/):
+
+- `config/server-settings.json` — server configuration
+- `config/map-settings.json`, `config/map-gen-settings.json` — gameplay and map generation (can be
+  [generated in-game from a map exchange string][map-settings])
+- `config/server-adminlist.json`, `config/server-whitelist.json` — admins and whitelist
+- `mods/mod-list.json` — enabled mods
+
+## Cost optimisation
+
+- **Spot/preemptible VMs** cut compute cost dramatically.
+- **[goppuku]** shuts the server down after 15 consecutive minutes with zero players.
+- The Cloud Run starter runs with **request-based (CPU-throttled) billing** and defers slow work to
+  Cloud Tasks, so you pay for CPU only while a request is in flight.
+- The **cleanup Cloud Function** (triggered periodically by Cloud Scheduler → Pub/Sub) removes
+  terminated instances and orphaned disks so they don't accrue storage charges.
 
 ## Related projects
 
-### goppuku
-
-[`goppuku`] is a small Go binary/service I built to have a server shut itself down if the player count stays at zero
-for fifteen consecutive minutes.
-
-The latest release of `goppuku` is installed in the Factorio server image by [Packer's provisioner script].
-
-## Author
-
-👤 **James Lucktaylor**
-
-- Website: jameslucktaylor.info
-- GitHub: [@jlucktay][4]
-- Twitter: [@jlucktay][2]
-- LinkedIn: [@jlucktay][linkedin]
+- **[goppuku]** — a small Go service that shuts a server down when it's been empty for fifteen
+  minutes; installed into the VM image by the [Packer provisioner](cloud-build/1-factorio-server/provisioner.sh).
+- **[Graftorio]** — optional Grafana + Prometheus monitoring, baked in with `build.sh --graftorio`.
 
 ## Contributing
 
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+Pull requests are welcome. For major changes, please open an issue first to discuss what you'd like to
+change. Please keep documentation up to date, and run `./lint-bash.sh` before pushing.
 
-Please make sure to update documentation and tests as appropriate.
+## Credit
 
-## Show your support
+This project began as a fork of [jlucktay/factorio-server-kit][jlucktay-repo] by James Lucktaylor, and
+has since grown a Cloud Run starter service, Cloud Tasks–backed provisioning, zone/machine-type
+fallback, and more. Thanks to the original author for the foundation.
 
-Give a ⭐️ if this project helped you!
+## License
 
-## 📝 License
+Released into the public domain under [the Unlicense].
 
-Copyright © 2020 [James Lucktaylor][4].
-
-This project is licensed with [the Unlicense].
-
-***
-_This README was generated with ❤️ by [readme-md-generator](https://github.com/kefranabg/readme-md-generator)_
-
-[`goppuku`]: https://github.com/jlucktay/goppuku
-[`locations.json` file]: lib/locations.json
-[1]: https://choosealicense.com/licenses/unlicense/
-[2]: https://twitter.com/jlucktay
-[3]: https://wakatime.com/badge/github/jlucktay/factorio-server-kit
-[4]: https://github.com/jlucktay
-[delete-vm.sh]: scripts/delete-vm.sh
-[Factorio server VM image]: cloud-build/1-factorio-server/README.md
-[gc-auth]: https://cloud.google.com/sdk/docs/authorizing
-[gc-inst]: https://cloud.google.com/sdk/install
-[gc-project]: https://cloud.google.com/resource-manager/docs/creating-managing-projects
-[gc-quick]: https://cloud.google.com/sdk/docs/quickstarts
+[Cloud Function]: https://cloud.google.com/functions
+[Factorio]: https://factorio.com
 [GCP Free Tier]: https://cloud.google.com/free/
 [Google Cloud SDK]: https://cloud.google.com/sdk
 [Graftorio]: https://github.com/afex/graftorio
-[jq-inst]: https://github.com/stedolan/jq/wiki/Installation
-[jq]: http://stedolan.github.io/jq/
-[linkedin]: https://linkedin.com/in/jlucktay
-[machine type]: https://cloud.google.com/compute/docs/machine-types
-[map-settings]: https://wiki.factorio.com/Command_line_parameters#Creating_the_JSON_files_from_a_map_exchange_string
-[Packer builder Docker image]: cloud-build/0-packer/README.md
-[Packer's provisioner script]: cloud-build/1-factorio-server/provisioner.sh
-[preemptible VMs]: https://cloud.google.com/compute/docs/instances/preemptible
-[roll-vm.sh]: scripts/roll-vm.sh
+[Packer]: https://www.packer.io
 [Terraform]: https://www.terraform.io
-[tf-inst]: https://learn.hashicorp.com/terraform/getting-started/install.html
-[the game]: https://factorio.com
+[gc-auth]: https://cloud.google.com/sdk/docs/authorizing
+[gc-inst]: https://cloud.google.com/sdk/install
+[goppuku]: https://github.com/jlucktay/goppuku
+[jlucktay-repo]: https://github.com/jlucktay/factorio-server-kit
+[jq]: https://jqlang.github.io/jq/
+[lefthook]: https://github.com/evilmartians/lefthook
+[map-settings]: https://wiki.factorio.com/Command_line_parameters#Creating_the_JSON_files_from_a_map_exchange_string
+[preemptible/Spot VMs]: https://cloud.google.com/compute/docs/instances/spot
 [the Unlicense]: https://unlicense.org
+[unlicense]: https://choosealicense.com/licenses/unlicense/
