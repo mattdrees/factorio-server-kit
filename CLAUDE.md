@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Factorio Server Kit automates running a Factorio game server on Google Cloud Platform using
-Spot/preemptible VMs to minimize costs. There are two ways to launch a server:
+Factorio Server Kit automates running a Factorio game server on Google Cloud Platform. Costs are kept
+low by an auto-shutdown service (goppuku) that stops the server when it's empty. There are two ways to
+launch a server:
 
 1. **From the command line** — the `scripts/roll-vm.sh` Bash script.
 2. **From a browser** — a Cloud Run "starter" service (`cloud-run/factorio-starter/`, a Python
@@ -260,8 +261,10 @@ dependencies are in cloud-run/factorio-starter/requirements.txt.
 
 ## Notes on Cost Optimization
 
-- Uses **Spot/preemptible VMs** to reduce compute costs significantly.
-- **goppuku** auto-shuts down the server after 15 minutes with zero players.
+- **goppuku** auto-shuts down the server after 15 minutes with zero players — the primary cost lever,
+  since compute is billed only while the server is up. (Servers are standard on-demand `c2d-standard-2`
+  VMs, not Spot/preemptible; the instance template in `cloud-build/1-factorio-server/cloudbuild.yaml`
+  uses `--maintenance-policy=MIGRATE`.)
 - The Cloud Run starter uses **request-based (CPU-throttled) billing** and defers slow work to Cloud
   Tasks, so CPU is billed only while a request is in flight.
 - The **cleanup Cloud Function** removes terminated instances and orphaned disks to avoid storage

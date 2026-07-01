@@ -4,9 +4,9 @@
 
 > Run your own [Factorio] server on Google Cloud, cheaply and (mostly) automatically.
 
-Factorio Server Kit stands up a Factorio game server on Google Cloud Platform. It leans on
-[preemptible/Spot VMs] and an auto-shutdown service to keep running costs low, and gives you two ways
-to launch a server:
+Factorio Server Kit stands up a Factorio game server on Google Cloud Platform. It keeps running costs
+low with an auto-shutdown service that stops the server when it's empty, and gives you two ways to
+launch a server:
 
 - **From your machine** — the `roll-vm.sh` Bash script (full control, all the knobs).
 - **From a browser** — a [Cloud Run "starter" service](cloud-run/factorio-starter/) with a small web
@@ -27,7 +27,7 @@ Go [Cloud Function] periodically cleans up terminated instances.
   You (CLI) ── roll-vm.sh ──────────────────────▶  │
                                                    ▼
                                      ┌──────────────────────────────┐
-                                     │  Compute Engine (Spot VM)     │
+                                     │  Compute Engine VM            │
                                      │  from newest `packtorio-*`    │
                                      │  instance template:           │
                                      │   • Factorio server container │
@@ -126,7 +126,7 @@ cd scripts
 ./delete-vm.sh 'factorio-*'           # delete servers matching a name pattern
 ```
 
-`roll-vm.sh` picks the newest `packtorio-*` instance template, creates a Spot VM from it (walking
+`roll-vm.sh` picks the newest `packtorio-*` instance template, creates a VM from it (walking
 zones and machine types on capacity stockouts), and updates the Cloud DNS A record to the new IP.
 
 Other handy scripts in [`scripts/`](scripts/):
@@ -169,8 +169,8 @@ Server behaviour is driven by the JSON under [`config/`](config/) and [`mods/`](
 
 ## Cost optimisation
 
-- **Spot/preemptible VMs** cut compute cost dramatically.
-- **[goppuku]** shuts the server down after 15 consecutive minutes with zero players.
+- **[goppuku]** shuts the server down after 15 consecutive minutes with zero players — the main lever,
+  since you only pay for compute while people are actually playing.
 - The Cloud Run starter runs with **request-based (CPU-throttled) billing** and defers slow work to
   Cloud Tasks, so you pay for CPU only while a request is in flight.
 - The **cleanup Cloud Function** (triggered periodically by Cloud Scheduler → Pub/Sub) removes
@@ -211,6 +211,5 @@ Released into the public domain under [the Unlicense].
 [jq]: https://jqlang.github.io/jq/
 [lefthook]: https://github.com/evilmartians/lefthook
 [map-settings]: https://wiki.factorio.com/Command_line_parameters#Creating_the_JSON_files_from_a_map_exchange_string
-[preemptible/Spot VMs]: https://cloud.google.com/compute/docs/instances/spot
 [the Unlicense]: https://unlicense.org
 [unlicense]: https://choosealicense.com/licenses/unlicense/
