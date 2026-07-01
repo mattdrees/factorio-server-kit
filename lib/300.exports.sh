@@ -51,7 +51,7 @@ unset default_zone
 # zones, before moving on to the next region. The template default (c2d-standard-2)
 # is always tried first, implicitly.
 # Keep in sync with cloud-run/factorio-starter/app/config.py.
-declare -ra FACTORIO_MACHINE_TYPE_FALLBACKS=(n2-standard-2 e2-standard-2)
+declare -ra FACTORIO_MACHINE_TYPE_FALLBACKS=(n2-standard-2 n2d-standard-2 e2-standard-2)
 
 # Ref: https://www.packer.io/downloads.html
 # Look for the 'packer_<version>_linux_amd64.zip' checksum, which is what our Docker image uses

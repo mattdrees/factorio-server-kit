@@ -3,17 +3,22 @@ from fastapi.responses import JSONResponse
 from datetime import datetime
 from app.auth import verify_api_key
 from app.gcp_state import get_server_status, has_running_or_creating_instance
-from app.compute import create_server_async
+from app.compute import create_server
 
 router = APIRouter()
 
 
 @router.post("/start")
-async def start_server(
+def start_server(
     background_tasks: BackgroundTasks,
     _: str = Depends(verify_api_key)
 ):
-    """Start server creation (async)"""
+    """Start server creation (async).
+
+    Defined as a sync handler so the blocking GCP probe in
+    has_running_or_creating_instance() runs in Starlette's threadpool instead
+    of on the event loop, keeping the single worker responsive.
+    """
     # Check GCP for existing instances
     if has_running_or_creating_instance():
         status = get_server_status()
@@ -27,7 +32,7 @@ async def start_server(
         )
 
     # Start creation in background
-    background_tasks.add_task(create_server_async)
+    background_tasks.add_task(create_server)
 
     # Return immediately
     return JSONResponse(
@@ -41,8 +46,12 @@ async def start_server(
 
 
 @router.get("/status")
-async def get_status(response: Response, _: str = Depends(verify_api_key)):
-    """Get current server status by querying GCP resources"""
+def get_status(response: Response, _: str = Depends(verify_api_key)):
+    """Get current server status by querying GCP resources.
+
+    Sync handler: get_server_status() makes blocking GCP list calls and an
+    RCON probe, so it must run in the threadpool, not on the event loop.
+    """
     # Prevent caching to ensure fresh status
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"

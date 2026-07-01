@@ -17,15 +17,22 @@ CAPACITY_ERROR_CODES = {
 }
 
 
-async def create_server_async():
+def create_server():
     """
     Background task to create server.
-    Note: This is now stateless - it just creates the instance.
-    Status is derived by querying GCP in the /status endpoint.
+
+    Runs as a *synchronous* Starlette BackgroundTask so the blocking GCP calls
+    below (and the polling loop in wait_for_operation) execute in a worker
+    thread rather than on the asyncio event loop. Blocking the single event
+    loop here is what previously starved gunicorn's heartbeat and got the
+    worker killed (WORKER TIMEOUT -> SIGABRT) before the machine-type fallbacks
+    were ever tried, surfacing to the UI as a plain-text 503 "Service
+    Unavailable". This is stateless - it just creates the instance; status is
+    derived by querying GCP in the /status endpoint.
     """
     try:
         # 1. Load locations from GCS.
-        locations = await load_locations_json()
+        locations = load_locations_json()
         default_loc = get_default_location(locations)
         location_name = default_loc["location"]
         all_zones = [zone for loc in locations for zone in loc.get("zones", [])]
@@ -55,32 +62,43 @@ async def create_server_async():
 
         # 4. Create instance from template, walking the fallback attempts on
         #    capacity shortages. "Stay in region, then downgrade": for each region
-        #    (default first), exhaust its zones with the preferred machine type,
-        #    then downgrade the machine type across those zones, before moving on
-        #    to the next region.
+        #    (default first), try the preferred machine type, then downgrade the
+        #    machine type, before moving on to the next region. Attempts are
+        #    grouped by (region, machine_type); a capacity stockout for a type is
+        #    treated as regional, so on the first capacity failure in a group we
+        #    skip the group's remaining zones and fall back to the next machine
+        #    type instead of burning ~7s polling each zone.
         machine_types = [None] + list(settings.machine_type_fallbacks)
-        attempts = build_create_attempts(locations, default_loc, machine_types)
+        attempt_groups = build_create_attempt_groups(locations, default_loc, machine_types)
 
         created_zone = None
         last_capacity_error = None
-        for zone, machine_type in attempts:
-            mt_label = machine_type or "template default"
-            logger.info(
-                f"Creating instance {instance_name} from template {template.name} "
-                f"in zone {zone} (machine type: {mt_label})"
-            )
-            try:
-                operation = create_instance(
-                    compute, zone, instance_name, template.self_link, machine_type=machine_type
+        for group in attempt_groups:
+            for zone, machine_type in group:
+                mt_label = machine_type or "template default"
+                logger.info(
+                    f"Creating instance {instance_name} from template {template.name} "
+                    f"in zone {zone} (machine type: {mt_label})"
                 )
-                wait_for_operation(operation, zone)
-                created_zone = zone
-                logger.info(f"Instance {instance_name} created in zone {zone} with machine type {mt_label}")
+                try:
+                    operation = create_instance(
+                        compute, zone, instance_name, template.self_link, machine_type=machine_type
+                    )
+                    wait_for_operation(operation, zone)
+                    created_zone = zone
+                    logger.info(f"Instance {instance_name} created in zone {zone} with machine type {mt_label}")
+                    break
+                except CapacityError as e:
+                    # Regional stockout: skip the rest of this (region, type)
+                    # group and fall back to the next machine type.
+                    logger.warning(
+                        f"No capacity for {mt_label} in zone {zone}; skipping rest of "
+                        f"this region/type group, trying next option: {e}"
+                    )
+                    last_capacity_error = e
+                    break
+            if created_zone is not None:
                 break
-            except CapacityError as e:
-                logger.warning(f"No capacity for {mt_label} in zone {zone}, trying next option: {e}")
-                last_capacity_error = e
-                continue
 
         if created_zone is None:
             raise Exception(
@@ -187,23 +205,28 @@ def _is_capacity_error(operation_error) -> bool:
     return False
 
 
-def build_create_attempts(locations: list, default_loc: dict, machine_types: list) -> list:
-    """Ordered (zone, machine_type) attempts as "stay in region, then downgrade":
-    for each region/location (default first), exhaust its zones with the preferred
-    machine type, then downgrade the machine type across those same zones, before
-    moving on to the next region. machine_types[0] is typically None (the instance
-    template's default machine type)."""
+def build_create_attempt_groups(locations: list, default_loc: dict, machine_types: list) -> list:
+    """Ordered groups of (zone, machine_type) attempts, "stay in region, then
+    downgrade". One group per (region, machine_type): for each region/location
+    (default first), a group for the preferred machine type, then a group per
+    downgrade, before moving on to the next region. machine_types[0] is typically
+    None (the instance template's default machine type).
+
+    The caller tries zones within a group in order, but treats a capacity
+    stockout as regional: on the first capacity failure in a group it abandons
+    that group's remaining zones and moves to the next group (next machine type).
+    Grouping is what lets the caller fail fast on a region-wide stockout of the
+    preferred type rather than polling every zone for it."""
     ordered_locations = [default_loc] + [loc for loc in locations if loc is not default_loc]
-    attempts = []
+    groups = []
     for loc in ordered_locations:
         zones = loc.get("zones", [])
         for machine_type in machine_types:
-            for zone in zones:
-                attempts.append((zone, machine_type))
-    return attempts
+            groups.append([(zone, machine_type) for zone in zones])
+    return groups
 
 
-async def load_locations_json():
+def load_locations_json():
     """Load locations.json from GCS"""
     storage_client = storage.Client()
     bucket = storage_client.bucket(f"{settings.google_cloud_project}-storage")

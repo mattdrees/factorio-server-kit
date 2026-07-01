@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     # machine type is unavailable. Tried after the template default, across a
     # region's zones, before moving on to the next region. Keep in sync with
     # lib/300.exports.sh.
-    machine_type_fallbacks: List[str] = ["n2-standard-2", "e2-standard-2"]
+    machine_type_fallbacks: List[str] = ["n2-standard-2", "n2d-standard-2", "e2-standard-2"]
 
     def __init__(self):
         super().__init__()

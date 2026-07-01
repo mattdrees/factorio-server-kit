@@ -202,6 +202,26 @@
             document.getElementById('statusBtn').disabled = !enabled;
         }
 
+        // Parse a JSON response, or throw a friendly error when the body is not
+        // JSON. Cloud Run returns a plain-text "Service Unavailable" 503 when
+        // the service is busy or restarting; calling response.json() on that
+        // throws "Unexpected token 'S'... is not valid JSON", which is useless
+        // to the player. Turn it into an actionable message instead.
+        async function readJsonOrThrow(response) {
+            const text = await response.text();
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                if (response.status >= 500 || response.status === 429) {
+                    throw new Error(
+                        `The starter service is busy or restarting (HTTP ${response.status}). ` +
+                        `Give it a minute and try "Check Status" — your server may still be coming up.`
+                    );
+                }
+                throw new Error(`Unexpected non-JSON response (HTTP ${response.status}).`);
+            }
+        }
+
         async function startServer() {
             const apiKey = getApiKey();
             if (!apiKey) {
@@ -225,7 +245,7 @@
                     body: '{}'
                 });
 
-                const data = await response.json();
+                const data = await readJsonOrThrow(response);
 
                 if (response.status === 202) {
                     showResult(`
@@ -281,7 +301,7 @@
                     }
                 });
 
-                const data = await response.json();
+                const data = await readJsonOrThrow(response);
 
                 if (data.status === 'none') {
                     showResult(`
