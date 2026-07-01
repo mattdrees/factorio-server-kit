@@ -12,10 +12,23 @@ done
 
 cd "$FACTORIO_ROOT/cloud-run/factorio-starter"
 
+image_repo="gcr.io/${CLOUDSDK_CORE_PROJECT:?}/factorio-starter"
+
 echo "Building container image..."
 gcloud builds submit \
-  --tag "gcr.io/${CLOUDSDK_CORE_PROJECT:?}/factorio-starter:latest" \
+  --tag "${image_repo}:latest" \
   .
+
+# Resolve the just-built :latest tag to its immutable digest. Terraform pins the
+# Cloud Run service to this digest so a code change yields a new image reference
+# and rolls a new revision; pinning to the floating :latest tag would leave
+# `terraform apply` with no diff and the old code still serving.
+echo ""
+echo "Resolving image digest..."
+image_digest=$(gcloud container images describe "${image_repo}:latest" \
+  --format="value(image_summary.fully_qualified_digest)")
+echo "  $image_digest"
+export TF_VAR_factorio_starter_image="$image_digest"
 
 echo ""
 echo "Deploying infrastructure via Terraform..."

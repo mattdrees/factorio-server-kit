@@ -8,7 +8,7 @@ resource "google_cloud_run_service" "factorio_starter" {
       service_account_name = google_service_account.factorio_starter.email
 
       containers {
-        image = "gcr.io/${var.project_id}/factorio-starter:latest"
+        image = local.factorio_starter_image
 
         env {
           name  = "GOOGLE_CLOUD_PROJECT"
