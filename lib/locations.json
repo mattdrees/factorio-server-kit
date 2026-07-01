@@ -1,27 +1,15 @@
 [
   {
     "default": true,
-    "location": "london",
-    "zone": "europe-west2-c"
+    "location": "iowa",
+    "zones": ["us-central1-c", "us-central1-a", "us-central1-b", "us-central1-f"]
   },
   {
     "location": "losangeles",
-    "zone": "us-west2-a"
-  },
-  {
-    "location": "sydney",
-    "zone": "australia-southeast1-b"
-  },
-  {
-    "location": "tokyo",
-    "zone": "asia-northeast1-c"
+    "zones": ["us-west2-a", "us-west2-c"]
   },
   {
     "location": "southcarolina",
-    "zone": "us-east1-d"
-  },
-  {
-    "location": "belgium",
-    "zone": "europe-west1-b"
+    "zones": ["us-east1-d", "us-east1-b", "us-east1-c"]
   }
 ]

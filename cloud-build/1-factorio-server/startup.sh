@@ -14,6 +14,7 @@ gsutil -m cp "gs://$PROJECT_ID-storage/fluentd/*" /etc/google-fluentd/config.d/ 
 gsutil -m cp "gs://$PROJECT_ID-storage/config/*-settings.json" /opt/factorio/config/ || true
 gsutil -m cp "gs://$PROJECT_ID-storage/config/server-*list.json" /opt/factorio/config/ || true
 gsutil -m cp "gs://$PROJECT_ID-storage/mods/mod-*.json" /opt/factorio/mods/ || true
+gsutil -m cp "gs://$PROJECT_ID-storage/mods/mod-settings.dat" /opt/factorio/mods/ || true
 
 logger "=== Get most recent game saves from appropriate Storage bucket"
 mtime_high_score=0
@@ -57,7 +58,7 @@ instance_zone=$(
 
 push_saves_to=$(
   jq --raw-output \
-    '.[] | select(.zone == "'"$(basename "$instance_zone")"'") | .location' \
+    '.[] | select(.zones | index("'"$(basename "$instance_zone")"'")) | .location' \
     <<< "$locations"
 )
 

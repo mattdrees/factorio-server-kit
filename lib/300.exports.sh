@@ -9,7 +9,9 @@ declare -A FACTORIO_SERVER_LOCATIONS
 for_loop_limit=$(jq length "$tmp_locations_json")
 
 for ((i = 0; i < for_loop_limit; i += 1)); do
-  tmp_location_zone=$(jq --raw-output ".[$i] | .location + \"=\" + .zone" "$tmp_locations_json")
+  # The first zone in each location's list is its primary/preferred zone; the
+  # rest are in-region fallbacks used by roll-vm.sh when capacity is exhausted.
+  tmp_location_zone=$(jq --raw-output ".[$i] | .location + \"=\" + .zones[0]" "$tmp_locations_json")
 
   IFS="=" read -r tmp_location tmp_zone <<< "$tmp_location_zone"
 
@@ -20,7 +22,7 @@ for ((i = 0; i < for_loop_limit; i += 1)); do
   jq_output=$(jq --raw-output ".[$i].default" "$tmp_locations_json")
   if [[ $jq_output == "true" ]]; then
     default_location=$(jq --raw-output ".[$i].location" "$tmp_locations_json")
-    default_zone=$(jq --raw-output ".[$i].zone" "$tmp_locations_json")
+    default_zone=$(jq --raw-output ".[$i].zones[0]" "$tmp_locations_json")
   fi
 done
 
@@ -42,6 +44,14 @@ export FACTORIO_IMAGE_NAME
 eval_input=$(factorio::env::set_location "${default_zone:?}")
 eval "$eval_input" # locations.json should have "default: true" on one location
 unset default_zone
+
+# Machine types to try, in order, when the instance template's default machine
+# type is unavailable (capacity stockout). roll-vm.sh exhausts a region's zones
+# with the template default first, then downgrades through these across those same
+# zones, before moving on to the next region. The template default (c2d-standard-2)
+# is always tried first, implicitly.
+# Keep in sync with cloud-run/factorio-starter/app/config.py.
+declare -ra FACTORIO_MACHINE_TYPE_FALLBACKS=(n2-standard-2 n2d-standard-2 e2-standard-2)
 
 # Ref: https://www.packer.io/downloads.html
 # Look for the 'packer_<version>_linux_amd64.zip' checksum, which is what our Docker image uses

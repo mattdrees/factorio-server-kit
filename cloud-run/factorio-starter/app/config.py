@@ -1,0 +1,38 @@
+from pydantic_settings import BaseSettings
+from typing import List
+import os
+
+
+class Settings(BaseSettings):
+    google_cloud_project: str = os.getenv("GOOGLE_CLOUD_PROJECT", "")
+    factorio_image_family: str = "packtorio"
+    factorio_dns_zone: str = "factorio-server"
+    factorio_dns_name: str = "factorio.menagerie.games"
+    factorio_storage_bucket: str = ""
+    port: int = 8080
+    # API key for the web UI / REST API, injected from Secret Manager via the
+    # API_KEY env var (see Terraform). Empty => auth fails closed.
+    api_key: str = os.getenv("API_KEY", "")
+    # Machine types to try (in order) when the instance template's default
+    # machine type is unavailable. Tried after the template default, across a
+    # region's zones, before moving on to the next region. Keep in sync with
+    # lib/300.exports.sh.
+    machine_type_fallbacks: List[str] = ["n2-standard-2", "n2d-standard-2", "e2-standard-2"]
+
+    # Cloud Tasks: /start enqueues a task that calls /internal/create, so the
+    # creation walk runs inside an authenticated request (CPU allocated for its
+    # full duration). All values are injected by Terraform (see the Cloud Run
+    # resource).
+    tasks_queue: str = os.getenv("TASKS_QUEUE", "factorio-create")
+    tasks_location: str = os.getenv("TASKS_LOCATION", "")
+    tasks_invoker_sa: str = os.getenv("TASKS_INVOKER_SA", "")
+    # Base URL of this service; used as the task target host and OIDC audience.
+    service_url: str = os.getenv("SERVICE_URL", "")
+
+    def __init__(self):
+        super().__init__()
+        if not self.factorio_storage_bucket:
+            self.factorio_storage_bucket = f"{self.google_cloud_project}-storage"
+
+
+settings = Settings()

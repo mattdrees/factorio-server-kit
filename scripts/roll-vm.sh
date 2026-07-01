@@ -120,9 +120,6 @@ if [[ -n $machine_type ]]; then
   echo " valid and available in zone '$CLOUDSDK_COMPUTE_ZONE'."
 fi
 
-# Delete any old servers that may already be deployed within the project
-factorio::vm::delete_instances "$server_type"-*
-
 # Look up latest instance template
 gcloud_template_list_args=(
   --format "value(name)"
@@ -142,29 +139,100 @@ if [[ -z $instance_template ]]; then
   err "no instance templates named '$template_filter' were found"
 fi
 
-# Create instance from template
-gcloud_instance_create_args=(
-  --format json
-  compute
-  instances
-  create
-)
-
+# Build the machine-type attempt list. If the user picked one explicitly, honor
+# only that (no downgrade). Otherwise try the template default first (empty
+# string), then the configured fallbacks.
 if [[ -n $machine_type ]]; then
-  gcloud_instance_create_args+=("--machine-type=$machine_type")
+  machine_type_attempts=("$machine_type")
+else
+  machine_type_attempts=("" "${FACTORIO_MACHINE_TYPE_FALLBACKS[@]}")
 fi
 
-gcloud_instance_create_args+=(
-  --source-instance-template "$instance_template"
-  --subnet default
-  "$server_type-$location-$(TZ=UTC date '+%Y%m%d-%H%M%S')"
-)
+# Build the ordered list of zone groups (one region's zones per line): the
+# selected location's region first, then every other region as a last resort.
+zone_groups_raw=$(factorio::env::zone_fallback_groups "$location")
+if [[ -z $zone_groups_raw ]]; then
+  err "no zones found for location '$location' in '$FACTORIO_ROOT/lib/locations.json'"
+fi
+mapfile -t zone_groups <<< "$zone_groups_raw"
 
-echo -n "Creating instance: gcloud "
-echo "${gcloud_instance_create_args[@]}"
-new_instance=$(gcloud "${gcloud_instance_create_args[@]}")
+# Order the (zone, machine-type) attempts as "stay in region, then downgrade":
+# for each region (selected first), exhaust its zones with the preferred machine
+# type, then downgrade the machine type across those same zones, before moving on
+# to the next region. Each attempt is encoded as "<zone>|<machine-type>" (an empty
+# machine type means the instance template's default).
+attempts=()
+for group in "${zone_groups[@]}"; do
+  read -ra region_zones <<< "$group"
+  for attempt_machine_type in "${machine_type_attempts[@]}"; do
+    for zone in "${region_zones[@]}"; do
+      attempts+=("$zone|$attempt_machine_type")
+    done
+  done
+done
+
+# Name the instance once so retries reuse the same name.
+new_instance_name="$server_type-$location-$(TZ=UTC date '+%Y%m%d-%H%M%S')"
+
+# Create instance from template, walking the fallback attempts on capacity shortages.
+new_instance=
+created_zone=
+for attempt in "${attempts[@]}"; do
+  zone=${attempt%%|*}
+  attempt_machine_type=${attempt#*|}
+  mt_label=${attempt_machine_type:-template default}
+
+  gcloud_instance_create_args=(
+    --format json
+    compute
+    instances
+    create
+    "--zone=$zone"
+  )
+
+  if [[ -n $attempt_machine_type ]]; then
+    gcloud_instance_create_args+=("--machine-type=$attempt_machine_type")
+  fi
+
+  gcloud_instance_create_args+=(
+    --source-instance-template "$instance_template"
+    --subnet default
+    "$new_instance_name"
+  )
+
+  echo -n "Creating instance in '$zone' (machine type: $mt_label): gcloud "
+  echo "${gcloud_instance_create_args[@]}"
+
+  create_stderr_file=$(mktemp)
+  if new_instance=$(gcloud "${gcloud_instance_create_args[@]}" 2> "$create_stderr_file"); then
+    rm -f "$create_stderr_file"
+    created_zone=$zone
+    echo "Instance '$new_instance_name' created in '$zone' with machine type '$mt_label'."
+    break
+  fi
+
+  create_stderr=$(< "$create_stderr_file")
+  rm -f "$create_stderr_file"
+  echo "$create_stderr" >&2
+
+  if grep -qE 'ZONE_RESOURCE_POOL_EXHAUSTED|RESOURCE_POOL_EXHAUSTED|does not have enough resources' <<< "$create_stderr"; then
+    echo "No capacity for '$mt_label' in '$zone'; trying the next option..." >&2
+    new_instance=
+    continue
+  fi
+
+  err "failed to create instance in zone '$zone' (non-capacity error, see above)"
+done
+
+if [[ -z $created_zone ]]; then
+  err "all zones and machine types exhausted; no capacity to create '$new_instance_name'. Try again later."
+fi
+
 new_instance_id=$(jq --raw-output '.[0].id' <<< "$new_instance")
 new_instance_ip=$(jq --raw-output '.[0].networkInterfaces[0].accessConfigs[0].natIP' <<< "$new_instance")
+
+# Now that the replacement is up, delete any older servers (create-before-delete).
+factorio::vm::delete_instances "$server_type-*" "$new_instance_name"
 
 factorio::dns::update "$server_type" "$new_instance_ip"
 

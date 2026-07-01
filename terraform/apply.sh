@@ -13,4 +13,10 @@ done
 export TF_VAR_project_id="$CLOUDSDK_CORE_PROJECT"
 
 cd "$script_dir"
-terraform apply
+
+# Check if --auto-approve flag is passed
+if [[ "${1:-}" == "--auto-approve" ]]; then
+  terraform apply -auto-approve
+else
+  terraform apply
+fi

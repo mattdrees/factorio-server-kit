@@ -9,6 +9,8 @@ resource "google_cloud_scheduler_job" "cleanup_disks" {
     topic_name = google_pubsub_topic.cleanup_disks.id
     data       = base64encode("{}")
   }
+
+  depends_on = [google_project_service.cloudscheduler]
 }
 
 resource "google_cloud_scheduler_job" "cleanup_instances" {
@@ -22,4 +24,6 @@ resource "google_cloud_scheduler_job" "cleanup_instances" {
     topic_name = google_pubsub_topic.cleanup_instances.id
     data       = base64encode("{}")
   }
+
+  depends_on = [google_project_service.cloudscheduler]
 }
