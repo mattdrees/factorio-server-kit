@@ -74,10 +74,11 @@ resource "google_cloud_run_service" "factorio_starter" {
     metadata {
       annotations = {
         "autoscaling.knative.dev/maxScale" = "1"
-        # NOTE: still always-allocated. Flip to "true" (request-based CPU) only
-        # AFTER verifying the Cloud Tasks path works end-to-end -- that is the
-        # cost-saving payoff of this migration and the final rollout step.
-        "run.googleapis.com/cpu-throttling" = "false"
+        # Request-based CPU billing. Safe because server creation now runs
+        # inside the Cloud Tasks-dispatched /internal/create request (CPU is
+        # allocated for the request's full duration); nothing relies on CPU
+        # after a response is sent.
+        "run.googleapis.com/cpu-throttling" = "true"
       }
     }
   }
