@@ -217,10 +217,18 @@ region. The machine-type list lives in **lib/300.exports.sh** and
 **cloud-run/factorio-starter/app/config.py** — keep them in sync.
 
 ### VM Naming Convention
-VMs are named: `<server-type>-<location>-<timestamp>`
-Example: `factorio-southcarolina-20231115-143022`
+VMs are named: `<server-type>-<region>-<timestamp>`
+Example: `factorio-us-east1-20231115-143022`
 
-This pattern is used by both roll-vm.sh (creation) and the cleanup Cloud Function (deletion).
+The `<region>` segment is the GCP region the VM is **actually** created in (derived by
+stripping the zone suffix, e.g. `us-west2-a` → `us-west2`), determined only after the
+capacity-fallback walk lands. It is NOT the requested location name — fallback can cross
+regions, so naming after the requested location would misreport where the VM lives.
+
+Because of this, the cleanup Cloud Function (`functions/instances.go`) must match on the
+generic `factorio-*` prefix across every zone, **not** `factorio-<location>-*` scoped to a
+location's own zones — a cross-region fallback VM would otherwise never match and never be
+cleaned up. Both roll-vm.sh (creation) and the cleanup function follow this.
 
 ### Google Cloud SDK Usage
 Scripts build gcloud command arrays and echo them before execution for transparency:

@@ -171,16 +171,23 @@ for group in "${zone_groups[@]}"; do
   done
 done
 
-# Name the instance once so retries reuse the same name.
-new_instance_name="$server_type-$location-$(TZ=UTC date '+%Y%m%d-%H%M%S')"
+# Fix the timestamp once so retries share it; the region segment of the name is
+# filled in per attempt below from the zone we actually land in. Capacity fallback
+# can cross regions, so naming after the selected location (e.g. "iowa") would lie
+# about where the VM really is — name it after the actual region instead.
+new_instance_timestamp=$(TZ=UTC date '+%Y%m%d-%H%M%S')
 
 # Create instance from template, walking the fallback attempts on capacity shortages.
 new_instance=
 created_zone=
+new_instance_name=
 for attempt in "${attempts[@]}"; do
   zone=${attempt%%|*}
   attempt_machine_type=${attempt#*|}
   mt_label=${attempt_machine_type:-template default}
+  # Derive the region from the zone (us-west2-a -> us-west2).
+  region=${zone%-*}
+  new_instance_name="$server_type-$region-$new_instance_timestamp"
 
   gcloud_instance_create_args=(
     --format json
@@ -225,7 +232,7 @@ for attempt in "${attempts[@]}"; do
 done
 
 if [[ -z $created_zone ]]; then
-  err "all zones and machine types exhausted; no capacity to create '$new_instance_name'. Try again later."
+  err "all zones and machine types exhausted; no capacity to create a '$server_type' server. Try again later."
 fi
 
 new_instance_id=$(jq --raw-output '.[0].id' <<< "$new_instance")

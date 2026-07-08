@@ -3,7 +3,6 @@ package cleanup
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"cloud.google.com/go/compute/metadata"
 	"github.com/cloudevents/sdk-go/v2/event"
@@ -31,10 +30,16 @@ func Instances(ctx context.Context, _ event.Event) error {
 		return fmt.Errorf("error creating Compute service: %w", err)
 	}
 
+	// We match on the generic "factorio-*" prefix rather than "factorio-<location>-*"
+	// scoped to that location's zones. Capacity fallback can create a VM in a
+	// different region than its name suggests (e.g. a "factorio-iowa-*" VM landing
+	// in a us-west2 zone), so coupling the name filter to the zone's location would
+	// let those cross-region fallback VMs slip through cleanup forever. Zones are
+	// disjoint across locations, so every zone is still visited exactly once.
 	for _, loc := range locs {
 		for _, zone := range loc.Zones {
 			listCall := computeService.Instances.List(projectID, zone)
-			listCall = listCall.Filter(fmt.Sprintf("name:factorio-%s-*", strings.ToLower(loc.Location)))
+			listCall = listCall.Filter("name:factorio-*")
 
 			list, err := listCall.Do()
 			if err != nil {
