@@ -222,6 +222,69 @@
             }
         }
 
+        // --- Background status polling ---
+        // Statuses that are still in progress; anything else (running, error,
+        // none) is terminal and stops the poll loop.
+        const TRANSITIONAL_STATUSES = ['creating', 'starting'];
+        const POLL_INTERVAL_MS = 5000;
+        const MAX_POLL_FAILURES = 5;
+
+        let pollTimer = null;
+        let pollToken = 0;       // bumped to invalidate any in-flight loop
+        let pollFailures = 0;
+        let isPolling = false;
+
+        function pollingNote() {
+            if (!isPolling) return '';
+            return `<div class="result-detail" style="margin-top: 8px; font-style: italic; color: #9ca3af;">
+                🔄 Auto-refreshing every ${POLL_INTERVAL_MS / 1000} seconds&hellip;
+            </div>`;
+        }
+
+        function stopPolling() {
+            if (pollTimer) {
+                clearTimeout(pollTimer);
+                pollTimer = null;
+            }
+            pollToken++;
+            isPolling = false;
+        }
+
+        function startPolling() {
+            stopPolling();
+            isPolling = true;
+            pollFailures = 0;
+            const myToken = pollToken;
+
+            const tick = async () => {
+                if (myToken !== pollToken) return;  // superseded by a newer loop
+                const status = await refreshStatus({ silent: true });
+                if (myToken !== pollToken) return;
+
+                if (status === null) {
+                    // Treat as a transient error: keep trying up to a cap so a
+                    // network blip doesn't kill auto-refresh.
+                    if (++pollFailures >= MAX_POLL_FAILURES) {
+                        isPolling = false;
+                        pollTimer = null;
+                        return;
+                    }
+                } else {
+                    pollFailures = 0;
+                }
+
+                if (status === null || TRANSITIONAL_STATUSES.includes(status)) {
+                    pollTimer = setTimeout(tick, POLL_INTERVAL_MS);
+                } else {
+                    // Reached a terminal state (running / error / none).
+                    isPolling = false;
+                    pollTimer = null;
+                }
+            };
+
+            pollTimer = setTimeout(tick, POLL_INTERVAL_MS);
+        }
+
         async function startServer() {
             const apiKey = getApiKey();
             if (!apiKey) {
@@ -232,6 +295,7 @@
                 return;
             }
 
+            stopPolling();
             showLoading('Starting server...');
             setButtonsEnabled(false);
 
@@ -254,9 +318,11 @@
                         <div class="result-detail"><strong>Started at:</strong> ${new Date(data.started_at).toLocaleString()}</div>
                         <div class="result-detail" style="margin-top: 16px;">
                             The server is being created. This usually takes 1-2 minutes.
-                            Click "Check Status" to see progress.
+                            This page will update automatically when it's ready.
                         </div>
                     `, 'status-creating');
+                    // Auto-refresh until the server is ready (or fails).
+                    startPolling();
                 } else if (response.status === 409) {
                     showResult(`
                         <div class="result-header status-error">⚠️ Server Already Exists</div>
@@ -264,6 +330,8 @@
                         ${data.instance_name ? `<div class="result-detail"><strong>Instance:</strong> ${data.instance_name}</div>` : ''}
                         ${data.instance_ip ? `<div class="result-detail"><strong>IP Address:</strong> ${data.instance_ip}</div>` : ''}
                     `, 'status-error');
+                    // A server already exists — poll so the page tracks its real status.
+                    startPolling();
                 } else {
                     showResult(`
                         <div class="result-header status-error">❌ Error</div>
@@ -280,18 +348,80 @@
             }
         }
 
-        async function checkStatus() {
+        // Render the result panel from a /status payload. Shared by the manual
+        // "Check Status" button and the background poll loop.
+        function renderStatus(data) {
+            if (data.status === 'none') {
+                showResult(`
+                    <div class="result-header status-none">💤 No Server Running</div>
+                    <div class="result-detail">No server is currently running or being created.</div>
+                    <div class="result-detail" style="margin-top: 16px;">
+                        Click "Start Server" to create a new one.
+                    </div>
+                `, 'status-none');
+            } else if (data.status === 'creating') {
+                showResult(`
+                    <div class="result-header status-creating">⏳ Server Creating...</div>
+                    <div class="result-detail"><strong>Status:</strong> ${data.status}</div>
+                    <div class="result-detail"><strong>Started at:</strong> ${new Date(data.started_at).toLocaleString()}</div>
+                    <div class="result-detail" style="margin-top: 16px;">
+                        The server is still being created. Please wait...
+                    </div>
+                    ${pollingNote()}
+                `, 'status-creating');
+            } else if (data.status === 'starting') {
+                showResult(`
+                    <div class="result-header status-starting">🚀 Server Starting...</div>
+                    <div class="result-detail"><strong>Status:</strong> VM is up, waiting for Factorio</div>
+                    <div class="result-detail"><strong>Instance:</strong> ${data.instance_name}</div>
+                    <div class="result-detail"><strong>IP Address:</strong> ${data.instance_ip}</div>
+                    <div class="result-detail"><strong>Zone:</strong> ${data.zone}</div>
+                    <div class="result-detail"><strong>Created at:</strong> ${new Date(data.created_at).toLocaleString()}</div>
+                    <div class="result-detail" style="margin-top: 16px;">
+                        The VM is up, waiting for the Factorio game server to start. This usually takes 1-2 minutes.
+                    </div>
+                    ${pollingNote()}
+                `, 'status-starting');
+            } else if (data.status === 'running') {
+                showResult(`
+                    <div class="result-header status-running">✅ Server Running!</div>
+                    <div class="result-detail"><strong>Instance:</strong> ${data.instance_name}</div>
+                    <div class="result-detail"><strong>IP Address:</strong> ${data.instance_ip}</div>
+                    <div class="result-detail"><strong>Zone:</strong> ${data.zone}</div>
+                    <div class="result-detail"><strong>Created at:</strong> ${new Date(data.created_at).toLocaleString()}</div>
+                    <div class="result-detail" style="margin-top: 16px;">
+                        Connect to: <strong>${data.instance_ip}:34197</strong>
+                    </div>
+                `, 'status-running');
+            } else if (data.status === 'error') {
+                showResult(`
+                    <div class="result-header status-error">❌ Server Creation Failed</div>
+                    <div class="result-detail"><strong>Error:</strong> ${data.message}</div>
+                    ${data.failed_at ? `<div class="result-detail"><strong>Failed at:</strong> ${new Date(data.failed_at).toLocaleString()}</div>` : ''}
+                `, 'status-error');
+            }
+        }
+
+        // Fetch /status and render it. Returns the status string, or null on
+        // error. In silent mode (background polling) it skips the spinner,
+        // leaves the buttons enabled, and doesn't clobber the panel on error.
+        async function refreshStatus(options = {}) {
+            const silent = options.silent === true;
             const apiKey = getApiKey();
             if (!apiKey) {
-                showResult(`
-                    <div class="result-header status-error">⚠️ Password Required</div>
-                    <div class="result-detail">Please enter a password to continue.</div>
-                `, 'status-error');
-                return;
+                if (!silent) {
+                    showResult(`
+                        <div class="result-header status-error">⚠️ Password Required</div>
+                        <div class="result-detail">Please enter a password to continue.</div>
+                    `, 'status-error');
+                }
+                return null;
             }
 
-            showLoading('Checking server status...');
-            setButtonsEnabled(false);
+            if (!silent) {
+                showLoading('Checking server status...');
+                setButtonsEnabled(false);
+            }
 
             try {
                 const response = await fetch('/status', {
@@ -302,61 +432,30 @@
                 });
 
                 const data = await readJsonOrThrow(response);
-
-                if (data.status === 'none') {
+                renderStatus(data);
+                return data.status;
+            } catch (error) {
+                if (!silent) {
                     showResult(`
-                        <div class="result-header status-none">💤 No Server Running</div>
-                        <div class="result-detail">No server is currently running or being created.</div>
-                        <div class="result-detail" style="margin-top: 16px;">
-                            Click "Start Server" to create a new one.
-                        </div>
-                    `, 'status-none');
-                } else if (data.status === 'creating') {
-                    showResult(`
-                        <div class="result-header status-creating">⏳ Server Creating...</div>
-                        <div class="result-detail"><strong>Status:</strong> ${data.status}</div>
-                        <div class="result-detail"><strong>Started at:</strong> ${new Date(data.started_at).toLocaleString()}</div>
-                        <div class="result-detail" style="margin-top: 16px;">
-                            The server is still being created. Please wait...
-                        </div>
-                    `, 'status-creating');
-                } else if (data.status === 'starting') {
-                    showResult(`
-                        <div class="result-header status-starting">🚀 Server Starting...</div>
-                        <div class="result-detail"><strong>Status:</strong> VM is up, waiting for Factorio</div>
-                        <div class="result-detail"><strong>Instance:</strong> ${data.instance_name}</div>
-                        <div class="result-detail"><strong>IP Address:</strong> ${data.instance_ip}</div>
-                        <div class="result-detail"><strong>Zone:</strong> ${data.zone}</div>
-                        <div class="result-detail"><strong>Created at:</strong> ${new Date(data.created_at).toLocaleString()}</div>
-                        <div class="result-detail" style="margin-top: 16px;">
-                            The VM is up, waiting for the Factorio game server to start. This usually takes 1-2 minutes.
-                        </div>
-                    `, 'status-starting');
-                } else if (data.status === 'running') {
-                    showResult(`
-                        <div class="result-header status-running">✅ Server Running!</div>
-                        <div class="result-detail"><strong>Instance:</strong> ${data.instance_name}</div>
-                        <div class="result-detail"><strong>IP Address:</strong> ${data.instance_ip}</div>
-                        <div class="result-detail"><strong>Zone:</strong> ${data.zone}</div>
-                        <div class="result-detail"><strong>Created at:</strong> ${new Date(data.created_at).toLocaleString()}</div>
-                        <div class="result-detail" style="margin-top: 16px;">
-                            Connect to: <strong>${data.instance_ip}:34197</strong>
-                        </div>
-                    `, 'status-running');
-                } else if (data.status === 'error') {
-                    showResult(`
-                        <div class="result-header status-error">❌ Server Creation Failed</div>
-                        <div class="result-detail"><strong>Error:</strong> ${data.message}</div>
-                        ${data.failed_at ? `<div class="result-detail"><strong>Failed at:</strong> ${new Date(data.failed_at).toLocaleString()}</div>` : ''}
+                        <div class="result-header status-error">❌ Network Error</div>
+                        <div class="result-detail">Failed to connect to server: ${error.message}</div>
                     `, 'status-error');
                 }
-            } catch (error) {
-                showResult(`
-                    <div class="result-header status-error">❌ Network Error</div>
-                    <div class="result-detail">Failed to connect to server: ${error.message}</div>
-                `, 'status-error');
+                return null;
             } finally {
-                setButtonsEnabled(true);
+                if (!silent) {
+                    setButtonsEnabled(true);
+                }
+            }
+        }
+
+        async function checkStatus() {
+            const status = await refreshStatus({ silent: false });
+            // If the server is mid-creation, keep the page updating on its own.
+            if (status !== null && TRANSITIONAL_STATUSES.includes(status)) {
+                startPolling();
+            } else {
+                stopPolling();
             }
         }
 
