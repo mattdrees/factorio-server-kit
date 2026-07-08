@@ -34,7 +34,6 @@ def create_server():
         # 1. Load locations from GCS.
         locations = load_locations_json()
         default_loc = get_default_location(locations)
-        location_name = default_loc["location"]
         all_zones = [zone for loc in locations for zone in loc.get("zones", [])]
         if not all_zones:
             raise Exception("No zones found in locations.json")
@@ -56,9 +55,13 @@ def create_server():
         templates.sort(key=lambda t: t.creation_timestamp, reverse=True)
         template = templates[0]
 
-        # 3. Generate instance name once, reused across zone attempts
+        # 3. Fix the timestamp once so retries share it; the region segment of the
+        #    name is filled in per attempt below from the zone we actually land in.
+        #    Capacity fallback can cross regions, so naming after the selected
+        #    location would lie about where the VM really is — name it after the
+        #    actual region instead.
         timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-        instance_name = f"factorio-{location_name}-{timestamp}"
+        instance_name = None
 
         # 4. Create instance from template, walking the fallback attempts on
         #    capacity shortages. "Stay in region, then downgrade": for each region
@@ -75,6 +78,9 @@ def create_server():
         last_capacity_error = None
         for group in attempt_groups:
             for zone, machine_type in group:
+                # Derive the region from the zone (us-west2-a -> us-west2).
+                region = zone.rsplit("-", 1)[0]
+                instance_name = f"factorio-{region}-{timestamp}"
                 mt_label = machine_type or "template default"
                 logger.info(
                     f"Creating instance {instance_name} from template {template.name} "
@@ -102,7 +108,7 @@ def create_server():
 
         if created_zone is None:
             raise Exception(
-                f"All zones and machine types exhausted; no capacity to create {instance_name}. "
+                "All zones and machine types exhausted; no capacity to create a server. "
                 f"Last error: {last_capacity_error}"
             )
 
